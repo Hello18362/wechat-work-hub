@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wechat-work-hub"
+version = "0.1.0"
+description = "本地优先的微信群聊多模态 AI 工作助手：采集、多模态处理、任务抽取"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "WeChat Work Hub" }]
+
+# 最小核心依赖：只保留跑通链路必需的三件套。
+dependencies = [
+    "requests>=2.31.0",
+    "PyYAML>=6.0.1",
+    "beautifulsoup4>=4.12.0",
+]
+
+# 可选依赖按需安装，避免 MVP 阶段环境过重。
+[project.optional-dependencies]
+asr = ["faster-whisper>=1.0.3"]
+html = ["markdown>=3.5", "python-dotenv>=1.0.0"]
+all = ["faster-whisper>=1.0.3", "markdown>=3.5", "python-dotenv>=1.0.0"]
+
+[project.scripts]
+wgh = "main:main"
+
+[tool.setuptools]
+py-modules = []
+
+[tool.setuptools.packages.find]
+include = [
+    "collector*",
+    "processor*",
+    "summarizer*",
+    "output*",
+    "core*",
+    "web*",
+]
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
