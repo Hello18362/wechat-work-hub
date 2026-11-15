@@ -1,0 +1,984 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="generator" content="WeChat Work Hub">
+<title>示例 · 项目协作群 · 2026-11-13 工作简报</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  --bg:#F4F4F1;--surface:#FFFFFF;--surface-2:#FAFAF8;--surface-3:#F0F0ED;
+  --ink:#141414;--ink-2:#5C5C58;--ink-3:#9A9A95;
+  --line:rgba(20,20,20,.09);--line-strong:rgba(20,20,20,.17);
+  --accent:#FF5C28;--accent-soft:rgba(255,92,40,.12);
+  --radius:18px;--radius-sm:12px;
+  --shadow-sm:0 1px 2px rgba(20,20,20,.05),0 6px 18px rgba(20,20,20,.05);
+  --shadow-lg:0 30px 70px -20px rgba(20,20,20,.3);
+  --dur:.34s;
+  --spring:cubic-bezier(.22,1.35,.36,1);
+  --out:cubic-bezier(.16,1,.3,1);
+}
+[data-theme="dark"]{
+  --bg:#0F0F0F;--surface:#171717;--surface-2:#1D1D1D;--surface-3:#232323;
+  --ink:#F4F4F2;--ink-2:#A9A9A4;--ink-3:#6E6E69;
+  --line:rgba(255,255,255,.10);--line-strong:rgba(255,255,255,.20);
+  --accent:#FF7A45;--accent-soft:rgba(255,122,69,.16);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.5);
+  --shadow-lg:0 30px 80px -24px rgba(0,0,0,.8);
+}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:15px;line-height:1.7;
+  -webkit-font-smoothing:antialiased;
+  transition:background var(--dur) var(--out),color var(--dur) var(--out);
+}
+a{color:inherit}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+/* ---------- 顶部导航：标题收缩吸顶（纯 transform，不重排不闪） ---------- */
+.nav{
+  position:sticky;top:0;z-index:60;
+  display:flex;align-items:center;gap:14px;
+  padding:18px 28px;margin-bottom:8px;
+  background:var(--bg);
+  box-shadow:0 0 0 0 transparent;
+  transition:box-shadow .3s var(--out);
+}
+body.is-scrolled .nav{
+  box-shadow:0 1px 0 var(--line),0 8px 24px -18px rgba(0,0,0,.28);
+}
+.nav-mark{
+  width:34px;height:34px;border-radius:11px;flex:none;
+  background:var(--ink);color:var(--bg);
+  display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:.5px;
+  transition:transform .34s var(--spring);
+}
+body.is-scrolled .nav-mark{transform:scale(.85)}
+.nav-titles{min-width:0}
+.nav-title{
+  margin:0;font-weight:800;letter-spacing:-.02em;line-height:1.15;
+  font-size:22px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transform-origin:left center;
+  transition:transform .34s var(--out);
+}
+body.is-scrolled .nav-title{transform:scale(.76)}
+.nav-sub{
+  color:var(--ink-3);font-size:12.5px;line-height:1.4;
+  max-height:24px;opacity:1;overflow:hidden;
+  transition:max-height .3s var(--out),opacity .24s var(--out);
+}
+body.is-scrolled .nav-sub{max-height:0;opacity:0}
+.nav-spacer{flex:1}
+.nav-date{font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+
+/* 弹性开关（04-2） */
+.switch{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+.switch-input{position:absolute;opacity:0;pointer-events:none}
+.switch-track{
+  width:42px;height:24px;border-radius:999px;background:var(--surface-3);
+  border:1px solid var(--line);position:relative;cursor:pointer;
+  transition:background .3s var(--out);
+}
+.switch-thumb{
+  position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;
+  background:var(--ink);
+  transition:transform .42s var(--spring),width .42s var(--spring),border-radius .42s var(--spring);
+}
+.switch-input:checked + .switch-track{background:var(--accent-soft)}
+.switch-input:checked + .switch-track .switch-thumb{
+  transform:translateX(18px);background:var(--accent);width:20px;border-radius:8px;
+}
+.switch-input:active + .switch-track .switch-thumb{width:26px}
+
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px 96px}
+
+/* ---------- Hero：大色块网格（07-4） ---------- */
+.hero{display:grid;grid-template-columns:1.15fr 1fr;gap:16px;margin:14px 0 30px}
+@media(max-width:860px){.hero{grid-template-columns:1fr}}
+.hero-card{
+  position:relative;border-radius:var(--radius);padding:26px 28px;
+  background:var(--ink);color:var(--bg);overflow:hidden;isolation:isolate;
+  box-shadow:var(--shadow-sm);
+}
+.hero-card::before{
+  content:"";position:absolute;inset:-140%;z-index:-1;
+  background:conic-gradient(from 0deg,transparent 0 62%,var(--accent) 76%,transparent 88% 100%);
+  animation:spin 18s linear infinite;opacity:.5;
+}
+.hero-card::after{
+  content:"";position:absolute;inset:1px;border-radius:calc(var(--radius) - 1px);
+  background:var(--ink);z-index:-1;
+}
+@keyframes spin{to{transform:rotate(1turn)}}
+.hero-kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;opacity:.62}
+.hero-num{
+  font-size:74px;line-height:1;font-weight:800;letter-spacing:-.045em;
+  font-variant-numeric:tabular-nums;margin:8px 0 6px;
+}
+.hero-sub{font-size:13px;opacity:.66;line-height:1.6}
+.hero-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.stat{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:16px 18px;box-shadow:var(--shadow-sm);
+  display:flex;flex-direction:column;justify-content:center;gap:2px;
+}
+.stat-val{font-size:30px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.stat-key{font-size:12px;color:var(--ink-3)}
+.stat.is-accent .stat-val{color:var(--accent)}
+
+/* ---------- 主体布局：目录联动滚动（07-18） ---------- */
+.layout{display:grid;grid-template-columns:188px 1fr;gap:34px;align-items:start}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.toc{display:none}}
+.toc{position:sticky;top:96px}
+.toc-title{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin:0 0 12px}
+.toc-list{position:relative;list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc-item{}
+.toc-link{
+  display:block;padding:7px 0 7px 14px;font-size:13.5px;color:var(--ink-2);
+  text-decoration:none;transition:color .2s var(--out),transform .3s var(--spring);
+}
+.toc-link:hover{color:var(--ink)}
+.toc-item.is-active .toc-link{color:var(--ink);font-weight:700}
+.toc-bar{
+  position:absolute;left:-2px;width:2px;background:var(--ink);border-radius:2px;
+  transition:transform .42s var(--spring),height .42s var(--spring);
+}
+
+/* ---------- 区块 ---------- */
+.section{scroll-margin-top:96px;margin-bottom:38px}
+.section-head{
+  display:flex;align-items:baseline;gap:12px;margin:0 0 14px;
+  padding-bottom:10px;border-bottom:1px solid var(--line);
+}
+.section-title{margin:0;font-size:19px;font-weight:800;letter-spacing:-.02em}
+.section-note{margin:0;font-size:12.5px;color:var(--ink-3)}
+.panel{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:24px 26px;box-shadow:var(--shadow-sm);
+}
+
+/* ---------- Markdown 内容 ---------- */
+.md-h{margin:22px 0 10px;letter-spacing:-.02em;line-height:1.35}
+.md-h:first-child{margin-top:0}
+h2.md-h{font-size:18px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+h3.md-h{font-size:15.5px}
+h4.md-h{font-size:14px;color:var(--ink-2)}
+.md-h + *{margin-top:0}
+p{margin:0 0 10px}
+.md-hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+.md-quote{
+  margin:0 0 12px;padding:10px 14px;border-radius:var(--radius-sm);
+  background:var(--surface-2);border-left:3px solid var(--accent);
+}
+.md-quote p:last-child{margin:0}
+.md-list{margin:0 0 12px;padding-left:20px}
+.md-list li{margin:3px 0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;
+  background:var(--surface-3);padding:2px 5px;border-radius:5px}
+pre.code{
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:14px 16px;overflow:auto;margin:0 0 12px;
+}
+pre.code code{background:none;padding:0}
+.empty{color:var(--ink-3)}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius-sm);margin:0 0 14px}
+.md-table{border-collapse:collapse;width:100%;font-size:13.5px}
+.md-table th,.md-table td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}
+.md-table th{background:var(--surface-2);font-weight:700;font-size:12.5px;color:var(--ink-2)}
+.md-table tr:last-child td{border-bottom:0}
+
+/* 任务行 */
+.task-list{list-style:none;margin:0 0 14px;padding:0}
+.task{
+  display:flex;align-items:flex-start;gap:10px;padding:9px 0;
+  border-bottom:1px dashed var(--line);
+}
+.task:last-child{border-bottom:0}
+.task-box{
+  width:16px;height:16px;margin-top:4px;flex:none;border-radius:5px;
+  border:1.5px solid var(--line-strong);
+}
+.task.is-done .task-title{text-decoration:line-through;color:var(--ink-3)}
+.task.is-done .task-box{background:var(--ink);border-color:var(--ink);position:relative}
+.task.is-done .task-box::after{
+  content:"";position:absolute;left:5px;top:2px;width:4px;height:8px;
+  border:1.5px solid var(--bg);border-top:0;border-left:0;transform:rotate(40deg);
+}
+.task-title{flex:1;min-width:0}
+.task-meta{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.chip{
+  font-size:11.5px;padding:2px 8px;border-radius:999px;white-space:nowrap;
+  background:var(--surface-3);color:var(--ink-2);
+}
+.chip-pri{background:var(--accent-soft);color:var(--accent);font-weight:700}
+.chip-due{background:var(--ink);color:var(--bg);font-variant-numeric:tabular-nums}
+
+/* ---------- 任务卡片网格：每张卡片一个任务（明亮卡片式） ---------- */
+.task-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;
+  margin:0 0 14px;
+}
+.task-card{
+  position:relative;display:flex;flex-direction:column;gap:8px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:16px 16px 14px;box-shadow:var(--shadow-sm);
+  overflow:hidden;transition:transform .22s var(--spring),box-shadow .22s var(--out),border-color .22s var(--out);
+}
+.task-card::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--ink-3);
+}
+.task-card[data-pri="紧急"]::before{background:var(--err)}
+.task-card[data-pri="重要"]::before{background:var(--accent)}
+.task-card[data-pri="高"]::before{background:var(--err)}
+.task-card[data-pri="中"]::before{background:var(--warn,#D9822B)}
+.task-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--line-strong)}
+.task-card.is-done{opacity:.62}
+.task-card-top{display:flex;align-items:center;gap:8px;padding-left:8px}
+.task-card-pri{
+  font-size:11px;font-weight:800;letter-spacing:.04em;padding:2px 9px;border-radius:999px;
+  background:var(--surface-3);color:var(--ink-2);
+}
+.task-card-pri[data-pri="紧急"]{background:rgba(211,60,60,.12);color:var(--err)}
+.task-card-pri[data-pri="重要"]{background:var(--accent-soft);color:var(--accent)}
+.task-card-title{
+  font-weight:700;font-size:14.5px;line-height:1.5;letter-spacing:-.01em;padding-left:8px;
+  word-break:break-word;
+}
+.task-card.is-done .task-card-title{text-decoration:line-through;color:var(--ink-3)}
+.task-card-meta{display:flex;flex-direction:column;gap:5px;padding-left:8px;margin-top:auto}
+.task-card-row{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2)}
+.task-card-row .ic{width:15px;text-align:center;color:var(--ink-3);font-size:11px;flex:none}
+.task-card-row .val{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-card-row .val.is-owner{font-weight:700;color:var(--ink)}
+.task-card-row .val.is-due{color:var(--ink-2);font-variant-numeric:tabular-nums}
+.task-card-row .val.is-src{color:var(--ink-3);font-size:11.5px}
+.task-card-empty{
+  padding:26px;text-align:center;color:var(--ink-3);font-size:13px;
+  border:1px dashed var(--line-strong);border-radius:var(--radius);
+}
+
+/* ---------- 过滤芯片：指示条连续滑动（06-4 变体） ---------- */
+.filter{
+  position:relative;display:inline-flex;gap:2px;padding:3px;
+  background:var(--surface-3);border-radius:999px;margin-bottom:14px;
+}
+.filter-bar{
+  position:absolute;top:3px;bottom:3px;left:0;width:0;border-radius:999px;
+  background:var(--surface);box-shadow:var(--shadow-sm);
+  transition:transform .42s var(--spring),width .42s var(--spring);
+}
+.filter-btn{
+  position:relative;z-index:1;padding:6px 16px;font-size:13px;border-radius:999px;
+  color:var(--ink-2);transition:color .24s var(--out),transform .18s var(--out);
+}
+.filter-btn:active{transform:scale(.96)}
+.filter-btn[aria-selected="true"]{color:var(--ink);font-weight:700}
+
+/* ---------- 聊天流：错峰弹入（03-11） ---------- */
+.stream{position:relative}
+.msg{
+  display:grid;grid-template-columns:38px 1fr;gap:12px;
+  padding:12px 14px;border-radius:var(--radius-sm);
+  border:1px solid transparent;
+  transition:background .24s var(--out),transform .2s var(--out),border-color .24s var(--out);
+  cursor:pointer;
+}
+.msg:hover{background:var(--surface);border-color:var(--line)}
+.msg:active{transform:scale(.992)}
+.msg + .msg{border-top:1px solid var(--line)}
+.msg.is-enter{animation:rowIn .52s var(--spring) both}
+@keyframes rowIn{from{opacity:0;transform:translateY(14px) scale(.986)}to{opacity:1;transform:none}}
+.msg.is-leader{background:var(--surface);border-color:var(--line)}
+.avatar{
+  width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+  background:var(--surface-3);color:var(--ink-2);font-weight:700;font-size:14px;
+}
+.msg.is-leader .avatar{background:var(--ink);color:var(--bg)}
+.msg-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.msg-name{font-weight:700;font-size:14px}
+.leader-tag{
+  font-size:11px;padding:1px 7px;border-radius:999px;
+  background:var(--accent-soft);color:var(--accent);font-weight:700;
+}
+.msg-time{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;margin-left:auto}
+.msg-body{margin:2px 0 0;color:var(--ink-2);white-space:pre-wrap;word-break:break-word}
+.msg.is-leader .msg-body{color:var(--ink)}
+.msg-note{margin:6px 0 0;font-size:11.5px;color:var(--ink-3)}
+.msg-type{
+  font-size:11px;color:var(--ink-3);border:1px solid var(--line);
+  padding:0 6px;border-radius:5px;
+}
+
+/* 领导发言浮标：吸顶但不推挤（05-9） */
+.leader-pin{
+  position:sticky;top:88px;z-index:20;display:flex;align-items:center;gap:8px;
+  margin:0 0 8px;padding:7px 12px;border-radius:999px;
+  background:var(--ink);color:var(--bg);font-size:12px;font-weight:700;
+  box-shadow:var(--shadow-sm);width:max-content;
+  opacity:0;transform:translateY(-8px) scale(.94);pointer-events:none;
+  transition:opacity .3s var(--out),transform .42s var(--spring);
+}
+.leader-pin.is-on{opacity:1;transform:none}
+
+/* ---------- 卡片弹出详情（01-8） ---------- */
+.modal-root{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:24px}
+.modal-root[hidden]{display:none}
+.scrim{
+  position:absolute;inset:0;background:rgba(10,10,10,.42);
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+  opacity:0;transition:opacity .34s var(--out);
+}
+.scrim.is-on{opacity:1}
+.modal-card{
+  position:relative;width:min(620px,100%);max-height:78vh;overflow:auto;
+  background:var(--surface);border-radius:var(--radius);
+  box-shadow:var(--shadow-lg);padding:22px 24px;
+  transform-origin:top left;
+}
+.modal-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.modal-title{font-weight:800;font-size:15px}
+.modal-x{
+  margin-left:auto;width:30px;height:30px;border-radius:9px;
+  display:grid;place-items:center;background:var(--surface-3);
+  transition:transform .2s var(--spring),background .2s var(--out);
+}
+.modal-x:hover{background:var(--surface-2)}
+.modal-x:active{transform:scale(.9)}
+.modal-body{white-space:pre-wrap;word-break:break-word;color:var(--ink-2);margin:0}
+.kv{display:grid;grid-template-columns:70px 1fr;gap:6px 12px;font-size:12.5px;margin:14px 0 0}
+.kv dt{color:var(--ink-3)}
+.kv dd{margin:0;color:var(--ink-2);word-break:break-all}
+
+/* ---------- Toast（05-2） ---------- */
+.toast-host{
+  position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:120;
+  display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;
+}
+.toast{
+  padding:9px 16px;border-radius:999px;background:var(--ink);color:var(--bg);
+  font-size:13px;box-shadow:var(--shadow-lg);
+  opacity:0;transform:translateY(12px) scale(.96);
+  transition:opacity .3s var(--out),transform .42s var(--spring);
+}
+.toast.is-on{opacity:1;transform:none}
+
+/* ---------- 回到顶部 ---------- */
+.to-top{
+  position:fixed;right:24px;bottom:28px;width:42px;height:42px;border-radius:50%;
+  background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-sm);
+  display:grid;place-items:center;z-index:80;
+  opacity:0;transform:translateY(14px) scale(.8);pointer-events:none;
+  transition:opacity .3s var(--out),transform .42s var(--spring);
+}
+.to-top.is-on{opacity:1;transform:none;pointer-events:auto}
+.to-top:active{transform:scale(.86)}
+.to-top:hover{background:var(--surface-2)}
+
+.foot{
+  margin-top:40px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-3);display:flex;gap:14px;flex-wrap:wrap;
+}
+.copy-btn{
+  padding:5px 12px;border-radius:999px;border:1px solid var(--line);
+  background:var(--surface);font-size:12px;color:var(--ink-2);
+  transition:transform .2s var(--spring),background .2s var(--out);
+}
+.copy-btn:hover{background:var(--surface-2)}
+.copy-btn:active{transform:scale(.94)}
+
+@media(prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-mark">W</div>
+  <div class="nav-titles">
+    <h1 class="nav-title">示例 · 项目协作群</h1>
+    <div class="nav-sub">领导发言 10 / 消息总数 18</div>
+  </div>
+  <div class="nav-spacer"></div>
+  <div class="nav-date">2026-11-13</div>
+  <label class="switch">
+    <input class="switch-input" type="checkbox" id="themeSwitch">
+    <span class="switch-track"><span class="switch-thumb"></span></span>
+    <span>深色</span>
+  </label>
+</header>
+
+<main class="wrap">
+<section class="hero" id="sec-overview">
+  <div class="hero-card">
+    <div class="hero-kicker">消息总数</div>
+    <div class="hero-num" data-count="18">18</div>
+    <div class="hero-sub">示例 · 项目协作群 · 2026-11-13<br>跨度 — · — 等 1 人参与</div>
+  </div>
+  <div class="hero-grid"><div class="stat is-accent"><span class="stat-val" data-count="10">10</span><span class="stat-key">领导发言</span></div>
+<div class="stat"><span class="stat-val" data-count="1">1</span><span class="stat-key">语音转写</span></div>
+<div class="stat"><span class="stat-val" data-count="1">1</span><span class="stat-key">图片</span></div>
+<div class="stat"><span class="stat-val" data-count="0">0</span><span class="stat-key">待办任务</span></div></div>
+</section>
+<div class="layout">
+  <nav class="toc">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="tocList">
+      <li class="toc-bar" aria-hidden="true"></li>
+<li class="toc-item"><a class="toc-link" href="#sec-overview">概览</a></li>
+<li class="toc-item"><a class="toc-link" href="#sec-tasks">任务</a></li>
+<li class="toc-item"><a class="toc-link" href="#sec-summary">总结</a></li>
+<li class="toc-item"><a class="toc-link" href="#sec-chat">聊天记录</a></li>
+    </ul>
+  </nav>
+  <div class="content">
+<section class="section" id="sec-tasks">
+  <div class="section-head">
+    <h2 class="section-title">任务安排</h2>
+    <p class="section-note">共 0 项 · 按优先级从左到右、从上到下</p>
+  </div>
+  <div class="task-card-empty">本次总结没有产出明确的任务事项。</div>
+</section>
+
+<section class="section" id="sec-summary">
+  <div class="section-head">
+    <h2 class="section-title">总结</h2>
+    <p class="section-note">从 18 条消息中提炼</p>
+  </div>
+  <div class="panel"><h3 class="md-h">今日要点</h3>
+<ul class="md-list">
+<li>版本 v0.9 已提测，张经理要求<strong>周四前完成回归</strong>，重点覆盖数据同步与导出。</li>
+<li>数据接口联调延后到明天上午，李主管负责对接对方技术同学。</li>
+<li>新增的「报告分享版」已完成评审，确认去掉原始聊天记录、对手机号与身份证打码。</li>
+</ul>
+<h3 class="md-h">风险与关注</h3>
+<ul class="md-list">
+<li>回归时间只有两天，测试人力只有一个，建议优先保证主流程。</li>
+<li>联调依赖外部团队，若明天上午未就绪，需要同步调整提测时间。</li>
+</ul>
+<h3 class="md-h">任务安排</h3>
+<ul class="md-list">
+<li>☐ 完成 v0.9 回归测试 · 负责人：张经理 · 截止：周四</li>
+<li>☐ 输出接口联调记录 · 负责人：李主管 · 截止：明天上午</li>
+<li>☐ 补充分享版脱敏规则说明 · 负责人：刘工 · 截止：周五</li>
+<li>☑ 评审会议纪要已归档</li>
+</ul></div>
+</section>
+
+<section class="section" id="sec-chat">
+  <div class="section-head">
+    <h2 class="section-title">聊天记录</h2>
+    <p class="section-note">18 条 · 其中领导发言 10 条 · 点击任意一条看细节</p>
+  </div>
+  <div class="filter" id="filterHost" role="tablist">
+  <span class="filter-bar" aria-hidden="true"></span>
+  <button class="filter-btn" role="tab" data-mode="all" aria-selected="true">全部</button>
+  <button class="filter-btn" role="tab" data-mode="leader" aria-selected="false">只看领导</button>
+</div>
+  <div class="stream">
+<div class="leader-pin" id="leaderPin">▲ 领导发言 · 张经理</div><div class="msg is-leader" data-idx="0" data-i="0">
+  <div class="avatar">张</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">张经理</span><span class="leader-tag">领导</span>
+      <span class="msg-time">09:12</span>
+    </div>
+    <p class="msg-body">早上好，v0.9 昨晚提测了，今天开始回归。</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="1" data-i="1">
+  <div class="avatar">张</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">张经理</span><span class="leader-tag">领导</span>
+      <span class="msg-time">09:13</span>
+    </div>
+    <p class="msg-body">重点看数据同步和导出这两块，周四前必须完成。</p>
+  </div>
+</div>
+<div class="msg" data-idx="2" data-i="2">
+  <div class="avatar">刘</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">刘工</span>
+      <span class="msg-time">09:20</span>
+    </div>
+    <p class="msg-body">收到，我这边先把导出用例跑一遍。</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="3" data-i="3">
+  <div class="avatar">李</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">李主管</span><span class="leader-tag">领导</span>
+      <span class="msg-time">09:34</span>
+    </div>
+    <p class="msg-body">接口联调对方今天请假，改到明天上午了。</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="4" data-i="4">
+  <div class="avatar">李</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">李主管</span><span class="leader-tag">领导</span>
+      <span class="msg-time">09:35</span>
+    </div>
+    <p class="msg-body">我明天上午十点拉会，一起过一遍字段。</p>
+  </div>
+</div>
+<div class="msg" data-idx="5" data-i="5">
+  <div class="avatar">刘</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">刘工</span><span class="msg-type">文件</span>
+      <span class="msg-time">10:02</span>
+    </div>
+    <p class="msg-body">[文件] 回归测试用例_v0.9.xlsx</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="6" data-i="6">
+  <div class="avatar">张</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">张经理</span><span class="leader-tag">领导</span>
+      <span class="msg-time">10:05</span>
+    </div>
+    <p class="msg-body">用例我看了，缺一个批量导出的场景，补一下。</p>
+  </div>
+</div>
+<div class="msg" data-idx="7" data-i="7">
+  <div class="avatar">小</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">小周</span><span class="msg-type">图片</span>
+      <span class="msg-time">10:40</span>
+    </div>
+    <p class="msg-body">[图片 1280×720]</p>
+  </div>
+</div>
+<div class="msg" data-idx="8" data-i="8">
+  <div class="avatar">小</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">小周</span>
+      <span class="msg-time">10:41</span>
+    </div>
+    <p class="msg-body">这是导出后 Excel 的样子，格式没问题。</p>
+  </div>
+</div>
+<div class="msg" data-idx="9" data-i="9">
+  <div class="avatar">阿</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">阿May</span><span class="msg-type">语音</span>
+      <span class="msg-time">11:15</span>
+    </div>
+    <p class="msg-body">[语音 8″]</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="10" data-i="10">
+  <div class="avatar">张</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">张经理</span><span class="leader-tag">领导</span><span class="msg-type">链接</span>
+      <span class="msg-time">14:20</span>
+    </div>
+    <p class="msg-body">https://example.com/blog/report-share</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="11" data-i="11">
+  <div class="avatar">张</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">张经理</span><span class="leader-tag">领导</span>
+      <span class="msg-time">14:21</span>
+    </div>
+    <p class="msg-body">这篇讲报告脱敏的思路，可以借鉴一下。</p>
+  </div>
+</div>
+<div class="msg" data-idx="12" data-i="12">
+  <div class="avatar">刘</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">刘工</span><span class="msg-type">表情</span>
+      <span class="msg-time">15:30</span>
+    </div>
+    <p class="msg-body">[表情]</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="13" data-i="13">
+  <div class="avatar">李</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">李主管</span><span class="leader-tag">领导</span>
+      <span class="msg-time">16:10</span>
+    </div>
+    <p class="msg-body">分享版评审通过了，按去掉聊天原文的方案做。</p>
+  </div>
+</div>
+<div class="msg" data-idx="14" data-i="14">
+  <div class="avatar">小</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">小周</span>
+      <span class="msg-time">16:12</span>
+    </div>
+    <p class="msg-body">那我把脱敏规则整理成一页说明。</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="15" data-i="15">
+  <div class="avatar">张</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">张经理</span><span class="leader-tag">领导</span><span class="msg-type">系统</span>
+      <span class="msg-time">17:05</span>
+    </div>
+    <p class="msg-body">系统消息：张经理 邀请 陈总监 加入了群聊</p>
+  </div>
+</div>
+<div class="msg is-leader" data-idx="16" data-i="16">
+  <div class="avatar">陈</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">陈总监</span><span class="leader-tag">领导</span>
+      <span class="msg-time">17:30</span>
+    </div>
+    <p class="msg-body">刚进群，麻烦把当前进度同步我一份。</p>
+  </div>
+</div>
+<div class="msg" data-idx="17" data-i="17">
+  <div class="avatar">刘</div>
+  <div>
+    <div class="msg-head">
+      <span class="msg-name">刘工</span>
+      <span class="msg-time">17:32</span>
+    </div>
+    <p class="msg-body">好的，我把用例和进度表一起发您。</p>
+  </div>
+</div>
+  </div>
+</section>
+  </div>
+</div>
+<footer class="foot">
+  <span>WeChat Work Hub · 本地生成 · 2026-11-14 21:07</span>
+  <span>领导发言 10 / 消息总数 18</span>
+  <span style="flex:1"></span>
+  <button class="copy-btn" id="copySummary">复制总结 Markdown</button>
+</footer>
+</main>
+
+<div class="modal-root" id="modalRoot" hidden>
+  <div class="scrim"></div>
+  <article class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <span class="modal-title"></span>
+      <button class="modal-x" aria-label="关闭">✕</button>
+    </div>
+    <p class="modal-body"></p>
+    <dl class="kv"></dl>
+  </article>
+</div>
+
+<div class="toast-host" id="toastHost"></div>
+<button class="to-top" id="toTop" aria-label="回到顶部">↑</button>
+
+<script id="wgh-payload" type="application/json">{"messages": [{"sender": "张经理", "time": "09:12", "fullTime": "2026-11-13 09:12", "typeLabel": "文字", "content": "早上好，v0.9 昨晚提测了，今天开始回归。", "raw": "", "note": "", "isLeader": true}, {"sender": "张经理", "time": "09:13", "fullTime": "2026-11-13 09:13", "typeLabel": "文字", "content": "重点看数据同步和导出这两块，周四前必须完成。", "raw": "", "note": "", "isLeader": true}, {"sender": "刘工", "time": "09:20", "fullTime": "2026-11-13 09:20", "typeLabel": "文字", "content": "收到，我这边先把导出用例跑一遍。", "raw": "", "note": "", "isLeader": false}, {"sender": "李主管", "time": "09:34", "fullTime": "2026-11-13 09:34", "typeLabel": "文字", "content": "接口联调对方今天请假，改到明天上午了。", "raw": "", "note": "", "isLeader": true}, {"sender": "李主管", "time": "09:35", "fullTime": "2026-11-13 09:35", "typeLabel": "文字", "content": "我明天上午十点拉会，一起过一遍字段。", "raw": "", "note": "", "isLeader": true}, {"sender": "刘工", "time": "10:02", "fullTime": "2026-11-13 10:02", "typeLabel": "文件", "content": "[文件] 回归测试用例_v0.9.xlsx", "raw": "", "note": "", "isLeader": false}, {"sender": "张经理", "time": "10:05", "fullTime": "2026-11-13 10:05", "typeLabel": "文字", "content": "用例我看了，缺一个批量导出的场景，补一下。", "raw": "", "note": "", "isLeader": true}, {"sender": "小周", "time": "10:40", "fullTime": "2026-11-13 10:40", "typeLabel": "图片", "content": "[图片 1280×720]", "raw": "", "note": "", "isLeader": false}, {"sender": "小周", "time": "10:41", "fullTime": "2026-11-13 10:41", "typeLabel": "文字", "content": "这是导出后 Excel 的样子，格式没问题。", "raw": "", "note": "", "isLeader": false}, {"sender": "阿May", "time": "11:15", "fullTime": "2026-11-13 11:15", "typeLabel": "语音", "content": "[语音 8″]", "raw": "", "note": "", "isLeader": false}, {"sender": "张经理", "time": "14:20", "fullTime": "2026-11-13 14:20", "typeLabel": "链接", "content": "https://example.com/blog/report-share", "raw": "", "note": "", "isLeader": true}, {"sender": "张经理", "time": "14:21", "fullTime": "2026-11-13 14:21", "typeLabel": "文字", "content": "这篇讲报告脱敏的思路，可以借鉴一下。", "raw": "", "note": "", "isLeader": true}, {"sender": "刘工", "time": "15:30", "fullTime": "2026-11-13 15:30", "typeLabel": "表情", "content": "[表情]", "raw": "", "note": "", "isLeader": false}, {"sender": "李主管", "time": "16:10", "fullTime": "2026-11-13 16:10", "typeLabel": "文字", "content": "分享版评审通过了，按去掉聊天原文的方案做。", "raw": "", "note": "", "isLeader": true}, {"sender": "小周", "time": "16:12", "fullTime": "2026-11-13 16:12", "typeLabel": "文字", "content": "那我把脱敏规则整理成一页说明。", "raw": "", "note": "", "isLeader": false}, {"sender": "张经理", "time": "17:05", "fullTime": "2026-11-13 17:05", "typeLabel": "系统", "content": "系统消息：张经理 邀请 陈总监 加入了群聊", "raw": "", "note": "", "isLeader": true}, {"sender": "陈总监", "time": "17:30", "fullTime": "2026-11-13 17:30", "typeLabel": "文字", "content": "刚进群，麻烦把当前进度同步我一份。", "raw": "", "note": "", "isLeader": true}, {"sender": "刘工", "time": "17:32", "fullTime": "2026-11-13 17:32", "typeLabel": "文字", "content": "好的，我把用例和进度表一起发您。", "raw": "", "note": "", "isLeader": false}], "summary_md": "## 今日要点\n\n- 版本 v0.9 已提测，张经理要求**周四前完成回归**，重点覆盖数据同步与导出。\n- 数据接口联调延后到明天上午，李主管负责对接对方技术同学。\n- 新增的「报告分享版」已完成评审，确认去掉原始聊天记录、对手机号与身份证打码。\n\n## 风险与关注\n\n- 回归时间只有两天，测试人力只有一个，建议优先保证主流程。\n- 联调依赖外部团队，若明天上午未就绪，需要同步调整提测时间。\n\n## 任务安排\n\n- ☐ 完成 v0.9 回归测试 · 负责人：张经理 · 截止：周四\n- ☐ 输出接口联调记录 · 负责人：李主管 · 截止：明天上午\n- ☐ 补充分享版脱敏规则说明 · 负责人：刘工 · 截止：周五\n- ☑ 评审会议纪要已归档\n"}</script>
+<script>
+(function(){
+  'use strict';
+  var payload = {};
+  try{ payload = JSON.parse(document.getElementById('wgh-payload').textContent || '{}'); }catch(e){}
+  var msgs = payload.messages || [];
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---- 数字缓停计数（04-7） ---- */
+  function easeOutExpo(t){ return t===1 ? 1 : 1 - Math.pow(2, -10*t); }
+  function countUp(el){
+    var target = parseFloat(el.getAttribute('data-count')||'0');
+    if(!target){ el.textContent='0'; return; }
+    var dur = reduce ? 0 : 900, start = null;
+    function frame(ts){
+      if(start===null) start = ts;
+      var p = Math.min((ts-start)/dur, 1);
+      var v = Math.round(target * easeOutExpo(p));
+      el.textContent = v >= 10000 ? Math.round(v/1000)+'k' : v;
+      if(p < 1) requestAnimationFrame(frame);
+    }
+    if(dur===0){ el.textContent = target; return; }
+    requestAnimationFrame(frame);
+  }
+  function initCounters(){
+    document.querySelectorAll('[data-count]').forEach(function(el){
+      el.textContent = '0';
+      countUp(el);
+    });
+  }
+
+  /* ---- 滚动收缩吸顶（rAF 节流 + 迟滞，避免边界抖动） ---- */
+  function initScrollChrome(){
+    var toTop = document.getElementById('toTop');
+    var ticking = false;
+    var scrolled = false;
+    function update(){
+      ticking = false;
+      var y = window.scrollY || 0;
+      // 迟滞：向下超过 24px 才收缩，向上回到 8px 以下才展开，避免临界点反复切换
+      if (y > 24 && !scrolled) scrolled = true;
+      else if (y < 8 && scrolled) scrolled = false;
+      document.body.classList.toggle('is-scrolled', scrolled);
+      if(toTop) toTop.classList.toggle('is-on', y > 420);
+    }
+    function onScroll(){
+      if(!ticking){ ticking = true; requestAnimationFrame(update); }
+    }
+    window.addEventListener('scroll', onScroll, {passive:true});
+    update();
+  }
+
+  /* ---- 目录联动滚动（07-18） ---- */
+  function initToc(){
+    var list = document.getElementById('tocList');
+    if(!list) return;
+    var links = Array.prototype.slice.call(list.querySelectorAll('.toc-link'));
+    var items = Array.prototype.slice.call(list.querySelectorAll('.toc-item'));
+    var bar = list.querySelector('.toc-bar');
+    var targets = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+
+    function moveBar(index){
+      if(!bar || !items[index]) return;
+      var item = items[index];
+      bar.style.height = item.offsetHeight + 'px';
+      bar.style.transform = 'translateY(' + item.offsetTop + 'px)';
+    }
+    function activate(index){
+      items.forEach(function(it,i){ it.classList.toggle('is-active', i===index); });
+      moveBar(index);
+    }
+    links.forEach(function(link, i){
+      link.addEventListener('click', function(ev){
+        ev.preventDefault();
+        var t = targets[i];
+        if(!t) return;
+        window.scrollTo({top: t.getBoundingClientRect().top + window.scrollY - 90, behavior: reduce?'auto':'smooth'});
+        activate(i);
+      });
+    });
+
+    if('IntersectionObserver' in window){
+      var visible = new Set();
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){ e.isIntersecting ? visible.add(e.target) : visible.delete(e.target); });
+        var best = -1, bestTop = Infinity;
+        targets.forEach(function(t,i){
+          if(!t || !visible.has(t)) return;
+          var top = Math.abs(t.getBoundingClientRect().top - 110);
+          if(top < bestTop){ bestTop = top; best = i; }
+        });
+        if(best >= 0) activate(best);
+      }, {rootMargin:'-80px 0px -60% 0px', threshold:[0,0.05,0.3]});
+      targets.forEach(function(t){ if(t) io.observe(t); });
+    }
+    window.addEventListener('resize', function(){
+      var idx = items.findIndex(function(it){ return it.classList.contains('is-active'); });
+      if(idx>=0) moveBar(idx);
+    });
+    if(targets[0] && getComputedStyle(list).display !== 'none') activate(0);
+  }
+
+  /* ---- 列表错峰弹入（03-11） ---- */
+  function initStagger(){
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.msg'));
+    function reveal(node){
+      node.style.animationDelay = (parseInt(node.getAttribute('data-i')||'0',10) * 22) + 'ms';
+      node.classList.add('is-enter');
+    }
+    if(reduce || !('IntersectionObserver' in window)){ rows.forEach(reveal); return; }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){ reveal(e.target); io.unobserve(e.target); }
+      });
+    }, {rootMargin:'0px 0px -8% 0px', threshold:0.01});
+    rows.forEach(function(r){ io.observe(r); });
+  }
+
+  /* ---- 领导发言浮标（05-9）：吸顶但不推挤内容 ---- */
+  function initLeaderPin(){
+    var pin = document.getElementById('leaderPin');
+    if(!pin) return;
+    if(!('IntersectionObserver' in window)) return;
+    var leaders = Array.prototype.slice.call(document.querySelectorAll('.msg.is-leader'));
+    if(!leaders.length) return;
+    var io = new IntersectionObserver(function(entries){
+      var on = entries.some(function(e){ return e.isIntersecting; });
+      pin.classList.toggle('is-on', on);
+    }, {rootMargin:'-120px 0px -62% 0px'});
+    leaders.forEach(function(n){ io.observe(n); });
+  }
+
+  /* ---- 过滤：只看领导 ---- */
+  function initFilter(){
+    var host = document.getElementById('filterHost');
+    if(!host) return;
+    var bar = host.querySelector('.filter-bar');
+    var btns = Array.prototype.slice.call(host.querySelectorAll('.filter-btn'));
+    function moveTo(btn){
+      if(!bar) return;
+      bar.style.width = btn.offsetWidth + 'px';
+      bar.style.transform = 'translateX(' + (btn.offsetLeft - 3) + 'px)';
+    }
+    function apply(mode){
+      btns.forEach(function(b){
+        b.setAttribute('aria-selected', String(b.getAttribute('data-mode')===mode));
+      });
+      var active = btns.filter(function(b){ return b.getAttribute('aria-selected')==='true'; })[0] || btns[0];
+      moveTo(active);
+      document.querySelectorAll('.msg').forEach(function(row){
+        row.style.display = (mode==='leader' && !row.classList.contains('is-leader')) ? 'none' : '';
+      });
+    }
+    btns.forEach(function(b){ b.addEventListener('click', function(){ apply(b.getAttribute('data-mode')); }); });
+    apply('all');
+    window.addEventListener('resize', function(){
+      var active = btns.filter(function(b){ return b.getAttribute('aria-selected')==='true'; })[0];
+      if(active) moveTo(active);
+    });
+  }
+
+  /* ---- 卡片弹出详情（01-8）：原位放大 / 原路收回 ---- */
+  function initModal(){
+    var root = document.getElementById('modalRoot');
+    if(!root) return;
+    var scrim = root.querySelector('.scrim');
+    var card = root.querySelector('.modal-card');
+    var title = root.querySelector('.modal-title');
+    var body = root.querySelector('.modal-body');
+    var kv = root.querySelector('.kv');
+    var origin = null;
+
+    function open(row){
+      var data = msgs[parseInt(row.getAttribute('data-idx')||'0',10)];
+      if(!data) return;
+      origin = row;
+      title.textContent = data.sender + ' · ' + data.time;
+      body.textContent = data.content || '（该消息没有文字内容）';
+      kv.innerHTML = '';
+      [['类型', data.typeLabel], ['时间', data.fullTime], ['备注', data.note], ['原始', data.raw]]
+        .forEach(function(pair){
+          if(!pair[1]) return;
+          var dt = document.createElement('dt'); dt.textContent = pair[0];
+          var dd = document.createElement('dd'); dd.textContent = pair[1];
+          kv.appendChild(dt); kv.appendChild(dd);
+        });
+
+      var from = row.getBoundingClientRect();
+      root.hidden = false;
+      var to = card.getBoundingClientRect();
+      var dx = from.left - to.left, dy = from.top - to.top;
+      var sx = from.width / to.width, sy = from.height / to.height;
+
+      requestAnimationFrame(function(){
+        scrim.classList.add('is-on');
+        if(!reduce){
+          card.animate(
+            [
+              {transform:'translate('+dx+'px,'+dy+'px) scale('+sx+','+sy+')', opacity:0.35, borderRadius:'12px'},
+              {transform:'none', opacity:1, borderRadius:'18px'}
+            ],
+            {duration:420, easing:'cubic-bezier(.2,1.12,.32,1)', fill:'both'}
+          );
+        }
+      });
+    }
+
+    function close(){
+      var from = card.getBoundingClientRect();
+      scrim.classList.remove('is-on');
+      var done = function(){ root.hidden = true; card.style.opacity=''; };
+      if(origin && !reduce){
+        var t = origin.getBoundingClientRect();
+        var dx = t.left - from.left, dy = t.top - from.top;
+        var sx = t.width / from.width, sy = t.height / from.height;
+        var anim = card.animate(
+          [
+            {transform:'none', opacity:1, borderRadius:'18px'},
+            {transform:'translate('+dx+'px,'+dy+'px) scale('+sx+','+sy+')', opacity:0.25, borderRadius:'12px'}
+          ],
+          {duration:320, easing:'cubic-bezier(.4,0,.6,1)', fill:'both'}
+        );
+        anim.onfinish = done; anim.oncancel = done; origin = null;
+      } else { done(); }
+    }
+
+    document.querySelectorAll('.msg').forEach(function(row){
+      row.addEventListener('click', function(){ open(row); });
+    });
+    scrim.addEventListener('click', close);
+    root.querySelector('.modal-x').addEventListener('click', close);
+    document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && !root.hidden) close(); });
+  }
+
+  /* ---- 主题弹性开关（04-2） ---- */
+  function initTheme(){
+    var root = document.documentElement;
+    var input = document.getElementById('themeSwitch');
+    if(!input) return;
+    function current(){ return root.getAttribute('data-theme') || 'light'; }
+    input.checked = current() === 'dark';
+    input.addEventListener('change', function(){
+      root.setAttribute('data-theme', input.checked ? 'dark' : 'light');
+    });
+  }
+
+  /* ---- Toast（05-2） ---- */
+  var toastTimer = null;
+  function toast(text){
+    var host = document.getElementById('toastHost');
+    if(!host) return;
+    var el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = text;
+    host.appendChild(el);
+    requestAnimationFrame(function(){ el.classList.add('is-on'); });
+    setTimeout(function(){
+      el.classList.remove('is-on');
+      setTimeout(function(){ el.remove(); }, 380);
+    }, 1900);
+  }
+
+  function initCopy(){
+    var btn = document.getElementById('copySummary');
+    if(!btn) return;
+    btn.addEventListener('click', function(){
+      var text = payload.summary_md || '';
+      if(!text){ toast('没有可复制的总结内容'); return; }
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select();
+      try{ document.execCommand('copy'); toast('总结已复制到剪贴板'); }
+      catch(e){ toast('复制失败，请手动选择文本'); }
+      ta.remove();
+    });
+  }
+
+  function initTop(){
+    var btn = document.getElementById('toTop');
+    if(!btn) return;
+    btn.addEventListener('click', function(){
+      window.scrollTo({top:0, behavior: reduce ? 'auto' : 'smooth'});
+    });
+  }
+
+  function boot(){
+    initTheme(); initScrollChrome(); initCounters(); initToc();
+    initStagger(); initLeaderPin(); initFilter(); initModal(); initCopy(); initTop();
+  }
+  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', boot); }
+  else { boot(); }
+})();
+</script>
+</body>
+</html>

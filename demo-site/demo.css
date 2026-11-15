@@ -1,0 +1,55 @@
+/* 演示模式提示条 */
+#demoBanner{
+  position:fixed;top:0;left:0;right:0;z-index:99999;
+  display:flex;align-items:center;gap:8px;
+  padding:8px 14px;
+  background:#1b1b1b;color:#f5f5f5;
+  font-size:12.5px;line-height:1.4;
+  font-family:inherit;
+  box-shadow:0 1px 0 rgba(0,0,0,.2);
+}
+#demoBanner .demo-dot{
+  width:7px;height:7px;border-radius:50%;flex:none;
+  background:#FF5C28;
+  box-shadow:0 0 0 3px rgba(255,92,40,.22);
+}
+#demoBanner strong{font-weight:600;flex:none}
+#demoBanner .demo-text{color:rgba(255,255,255,.72)}
+@media (max-width:640px){
+  #demoBanner{font-size:11px;padding:6px 10px}
+  #demoBanner .demo-text{display:none}
+}
+
+/* 报告页内预览：盖满全屏，顶部一条操作栏 */
+#demoReportOverlay{
+  position:fixed;inset:0;z-index:100000;
+  display:flex;flex-direction:column;
+  background:#1b1b1b;
+}
+#demoReportOverlay .demo-ov-bar{
+  display:flex;align-items:center;gap:14px;flex:none;
+  height:42px;padding:0 14px;
+  background:#1b1b1b;color:#f5f5f5;
+  font-size:12.5px;
+  border-bottom:1px solid rgba(255,255,255,.12);
+}
+#demoReportOverlay .demo-ov-title{font-weight:600}
+#demoReportOverlay .demo-ov-link{
+  margin-left:auto;color:#FF8A5C;text-decoration:none;
+  border-bottom:1px dashed rgba(255,138,92,.55);
+}
+#demoReportOverlay .demo-ov-link:hover{color:#FF5C28}
+#demoReportOverlay .demo-ov-close{
+  flex:none;cursor:pointer;
+  padding:5px 14px;border-radius:999px;
+  border:1px solid rgba(255,255,255,.28);
+  background:transparent;color:#f5f5f5;
+  font-size:12px;font-family:inherit;
+  transition:background .22s cubic-bezier(.22,1.35,.36,1),border-color .22s cubic-bezier(.22,1.35,.36,1);
+}
+#demoReportOverlay .demo-ov-close:hover{
+  background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.5);
+}
+#demoReportOverlay .demo-ov-frame{
+  flex:1;width:100%;border:0;background:#fafafa;
+}

@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: regression (${{ matrix.os }} / py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.11"]
+
+    env:
+      # Windows 非中文代码页下 print 中文会崩，CI 里统一强制 UTF-8
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[html]"
+
+      - name: Regression tests
+        # tests/test_regression.py 是纯标准库 unittest，不需要 pytest；
+        # tests/test_server.py 需要先起控制台服务，暂不进 CI。
+        run: python tests/test_regression.py
+
+      - name: Sanity import
+        run: python -c "import main, core.config, output.html, web.server; print('ok')"

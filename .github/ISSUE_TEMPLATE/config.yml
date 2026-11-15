@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题（不要发公开 Issue）
+    url: https://github.com/Hello18362/wechat-work-hub/security/policy
+    about: 密钥泄漏、隐私外泄、服务端漏洞，请按 SECURITY.md 私下报告。
+  - name: 使用问题
+    url: https://github.com/Hello18362/wechat-work-hub#readme
+    about: 先看 README「它不能做什么」与 FAQ，很多问题那里已经写了。

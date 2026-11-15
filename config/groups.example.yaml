@@ -1,0 +1,44 @@
+# 群配置示例 / Example group config
+# ---------------------------------------------------------------------------
+# 用法：把本文件复制为 config/groups.yaml，然后改成你自己的群。
+#   Windows:  copy config\groups.example.yaml config\groups.yaml
+#   macOS/Linux: cp config/groups.example.yaml config/groups.yaml
+#
+# 为什么真实配置不进仓库：config/groups.yaml 已被 .gitignore 忽略，
+# 因为它包含真实群名与成员姓名，属于隐私。
+#
+# 字段说明
+#   name     目标群名称，必须与微信里显示的群名完全一致（可用 python main.py --list-groups 查）
+#   enabled  false 时跳过该群，默认 true
+#   pinned   在控制台里置顶显示，默认 false
+#   leaders  该群需要重点标记的人；命中后在报告中打 [领导] 标记
+#              - name: 微信昵称或群备注名
+#              - id:   微信号（wxid_xxx），可留空；id 与 name 任一匹配即算命中，id 优先
+# ---------------------------------------------------------------------------
+
+target_groups:
+  - name: "XX项目工作群"
+    enabled: true
+    pinned: true
+    leaders:
+      - name: "张总"
+        id: ""
+      - name: "王经理"
+        id: "wxid_xxxxxxxxxxxx"
+
+  - name: "部门周会群"
+    enabled: true
+    pinned: false
+    leaders:
+      - name: "赵总监"
+        id: ""
+
+  # 不想被总结的群，把 enabled 设为 false 保留配置
+  - name: "闲聊群"
+    enabled: false
+    leaders: []
+
+# 跨群都要关注的人放这里，会自动追加到上面每个群
+global_leaders:
+  - name: "孙总"
+    id: ""
