@@ -155,11 +155,18 @@ def prepare_group(group: str, date_text: str, messages: Sequence[Any], client: A
             if kind == "article":
                 continue  # URL 已在 content/note 中，不是本端文件。
             if kind not in MEDIA_KINDS:
-                raise PushError(f"消息 {getattr(msg, 'msg_id', '')} 含不支持的附件类型：{kind or '空'}")
+                print(f"  ! {group}：跳过不支持的附件类型 {kind or '空'}（消息 {getattr(msg, 'msg_id', '')}）", flush=True)
+                continue
             if any(part.kind == kind for part in row_media):
-                raise PushError(f"消息 {getattr(msg, 'msg_id', '')} 含多个 {kind}，当前协议一条消息只允许一个")
+                print(f"  ! {group}：一条消息含多个 {kind}，仅保留第一个", flush=True)
+                continue
             key = attachment.get("key") or getattr(msg, "raw_content", "") or getattr(msg, "msg_id", "")
-            part = _read_media(client, msg, kind, key)
+            try:
+                part = _read_media(client, msg, kind, key)
+            except PushError as exc:
+                # 单个附件取不到，不该让整群失败：降级为该条消息只发文字
+                print(f"  ! {group}：跳过 {kind}（{exc}）", flush=True)
+                continue
             part = MediaPart(
                 field=f"{msg_id}.{kind}", kind=part.kind, filename=part.filename, payload=part.payload
             )

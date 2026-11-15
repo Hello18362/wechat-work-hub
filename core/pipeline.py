@@ -194,7 +194,7 @@ def run_pipeline(
         raise PipelineError(
             f"连不上数据源（解密目录：{data_dir}）。"
             "请确认：① 微信电脑版已登录；② 已运行 SIWX 刷新解密数据"
-            "（双击「刷新数据.bat」或「启动.bat」会自动刷新）。"
+            "（双击「刷新数据.bat」可手动刷新；控制台也会在后台自动刷新）。"
         )
 
     leaders = get_leaders(options.group, groups_path)

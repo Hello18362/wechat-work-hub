@@ -8,8 +8,9 @@ version = "0.1.0"
 description = "本地优先的微信群聊多模态 AI 工作助手：采集、多模态处理、任务抽取"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "WeChat Work Hub" }]
+# 非商业用途，可修改可再分发（详见仓库根目录 LICENSE）
+license = { text = "PolyForm Noncommercial License 1.0.0" }
+authors = [{ name = "Hello18362" }]
 
 # 最小核心依赖：只保留跑通链路必需的三件套。
 dependencies = [
@@ -22,7 +23,10 @@ dependencies = [
 [project.optional-dependencies]
 asr = ["faster-whisper>=1.0.3"]
 html = ["markdown>=3.5", "python-dotenv>=1.0.0"]
-all = ["faster-whisper>=1.0.3", "markdown>=3.5", "python-dotenv>=1.0.0"]
+# 桌面软件：pywebview 提供原生窗口；pyinstaller 仅打包时需要
+desktop = ["pywebview>=4.2"]
+build = ["pyinstaller>=6.0"]
+all = ["faster-whisper>=1.0.3", "markdown>=3.5", "python-dotenv>=1.0.0", "pywebview>=4.2"]
 
 [project.scripts]
 wgh = "main:main"

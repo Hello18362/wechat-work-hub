@@ -26,20 +26,27 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
 from collector.chatlog_client import build_client_from_config
+from core.auto_refresh import get_refresher
 from core.config import (
+    PROJECT_ROOT,
     ConfigError,
     load_groups,
     load_groups_raw,
     load_settings,
+    read_model_config,
     resolve_path,
     save_group_leaders,
+    save_model_config,
+    saved_api_key,
+    set_group_pinned,
 )
 from core.log import get_logger
 from core.pipeline import PipelineError, RunOptions, run_pipeline
+from summarizer.doubao_api import test_connection
 
 logger = get_logger("web")
 
-ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+ASSETS_DIR = PROJECT_ROOT / "web" / "assets"
 MAX_TASKS = 30
 MAX_LOGS = 200
 MAX_BODY_BYTES = 1 << 20  # 请求体上限，防止恶意 Content-Length 把内存打爆
@@ -163,6 +170,33 @@ _CLIENT_LOCK = threading.Lock()
 _CLIENT: Optional[Any] = None
 _CLIENT_KEY = ""
 
+# 自动刷新节流：避免 /api/status 每 1.5s 轮询都去检查/触发解密
+_REFRESH_LOCK = threading.Lock()
+_LAST_REFRESH_CHECK = 0.0
+
+
+def _maybe_auto_refresh(cfg: Dict[str, Any]) -> None:
+    """非阻塞地唤醒自动刷新线程（带节流）。
+
+    ⚠️ 这里**绝不能**同步跑 SIWX：解密要几秒到几十秒，而本函数位于
+    `/api/status`、`/api/groups` 的请求路径上。之前直接调
+    `refresh_once()` 会阻塞请求线程，导致浏览器打开页面时一直转圈、
+    表现为「网站打不开」。现在只发一个唤醒信号就返回。
+    """
+    global _LAST_REFRESH_CHECK
+    ar = (cfg.get("chatlog") or {}).get("auto_refresh") or {}
+    if not ar.get("enabled", True):
+        return
+    now = time.time()
+    with _REFRESH_LOCK:
+        if now - _LAST_REFRESH_CHECK < 30:
+            return
+        _LAST_REFRESH_CHECK = now
+    try:
+        get_refresher(cfg).kick()
+    except Exception as exc:  # noqa: BLE001 - 唤醒失败不影响取数
+        logger.debug("自动刷新唤醒失败：%s", exc)
+
 
 def shared_client(cfg: Dict[str, Any]):
     """返回复用的 chatlog 客户端。
@@ -171,8 +205,13 @@ def shared_client(cfg: Dict[str, Any]):
     现造一个实例，就等于每次新建一条 TCP 连接（外加一个 ConnectionPool）。
     长时间挂着会持续累积 TIME_WAIT 套接字与句柄 —— 这是典型的慢泄漏。
     配置变化时（改了 api_base 等）自动换掉旧实例。
+
+    同时做「按需自动刷新」：每次取客户端前检查解密库是否过期，过期则
+    后台触发一次 SIWX 解密（有节流，不会频繁跑）。
     """
     global _CLIENT, _CLIENT_KEY
+
+    _maybe_auto_refresh(cfg)
 
     key = json.dumps(cfg.get("chatlog") or {}, sort_keys=True, default=str)
     with _CLIENT_LOCK:
@@ -413,9 +452,11 @@ class HubHandler(BaseHTTPRequestHandler):
             "/api/status": self._api_status,
             "/api/groups": self._api_groups,
             "/api/groups/config": self._api_groups_config,
+            "/api/contacts": self._api_contacts,
             "/api/runs": self._api_runs,
             "/api/report": self._api_report,
             "/api/task": self._api_task,
+            "/api/model": self._api_model_get,
         }
 
         if path.startswith("/reports/"):
@@ -438,6 +479,15 @@ class HubHandler(BaseHTTPRequestHandler):
         if path == "/api/groups/config":
             self._api_save_groups_config()
             return
+        if path == "/api/groups/pin":
+            self._api_toggle_pin()
+            return
+        if path == "/api/model":
+            self._api_model_save()
+            return
+        if path == "/api/model/test":
+            self._api_model_test()
+            return
         self._error("未知接口", 404)
 
     def _handle_delete(self) -> None:
@@ -454,7 +504,13 @@ class HubHandler(BaseHTTPRequestHandler):
 
     # ---------- 页面与静态资源 ---------- #
     def _page(self, query: Dict[str, List[str]]) -> None:
-        """返回控制台首页。"""
+        """返回控制台首页。
+
+        注入 `{{ASSET_V}}` = app.js / style.css 的最新 mtime，让 index.html 里的
+        资源地址带上 `?v=`。这样**改了前端之后浏览器一定拉取新文件**，
+        不会出现「服务端是新的、浏览器还在用缓存里的旧 app.js」这种错配
+        （它的表现就是：界面上点了没反应、或调用不存在的接口）。
+        """
         index = ASSETS_DIR / "index.html"
         if not index.exists():
             self._send(
@@ -463,10 +519,24 @@ class HubHandler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
             )
             return
-        self._send(index.read_bytes(), 200, "text/html; charset=utf-8")
+        try:
+            html = index.read_text(encoding="utf-8")
+            stamp = int(
+                max(
+                    (ASSETS_DIR / "app.js").stat().st_mtime,
+                    (ASSETS_DIR / "style.css").stat().st_mtime,
+                )
+            )
+            html = html.replace("{{ASSET_V}}", str(stamp))
+        except OSError:
+            html = index.read_text(encoding="utf-8")
+        self._send(html.encode("utf-8"), 200, "text/html; charset=utf-8")
 
     def _serve_asset(self, name: str) -> None:
         """返回静态资源（css / js）。"""
+        # 去掉查询串/锚点：前端用 ?v=<mtime> 做缓存失效，
+        # 不能把 "app.js?v=123" 当成文件名去找，否则直接 404。
+        name = name.split("?", 1)[0].split("#", 1)[0]
         target = _safe_name(ASSETS_DIR, name)
         if not target or not target.exists():
             return self._error("资源不存在", 404)
@@ -488,7 +558,12 @@ class HubHandler(BaseHTTPRequestHandler):
 
     # ---------- API ---------- #
     def _api_status(self, query: Dict[str, List[str]]) -> None:
-        """返回服务与 chatlog 的健康状态。"""
+        """返回服务与 chatlog 的健康状态。
+
+        `features` 用于前端做**能力自检**：如果浏览器里是新的前端、而服务端
+        还是旧代码（改了 Python 却没重启进程），前端可以据此明确提示
+        「请重启服务」，而不是让用户面对一个含糊的 404「未知接口」。
+        """
         client = shared_client(self.cfg)
         online = client.health()
         from core.config import list_prompt_templates
@@ -501,13 +576,24 @@ class HubHandler(BaseHTTPRequestHandler):
                 "today": datetime.now().strftime("%Y-%m-%d"),
                 "templates": list_prompt_templates(),
                 "version": "0.1.0",
+                # 服务端已实现的功能；前端据此判断是否需要提示重启
+                "features": [
+                    "contacts",
+                    "pin",
+                    "auto_refresh_async",
+                    "contacts_query",
+                    "model_config",
+                ],
+                "build": "2026-11-15-01",
             }
         )
 
     def _api_groups(self, query: Dict[str, List[str]]) -> None:
-        """返回 chatlog 群列表，并标注是否已在 groups.yaml 中配置。"""
+        """返回 chatlog 群列表，并标注是否已在 groups.yaml 中配置、是否置顶。"""
         client = shared_client(self.cfg)
-        configured = {g["name"]: len(g.get("leaders", [])) for g in load_groups()}
+        loaded = load_groups()
+        configured = {g["name"]: len(g.get("leaders", [])) for g in loaded}
+        pinned = {g["name"] for g in loaded if g.get("pinned")}
         merged: List[Dict[str, Any]] = []
 
         if client.health():
@@ -518,6 +604,7 @@ class HubHandler(BaseHTTPRequestHandler):
                         "name": name,
                         "configured": name in configured,
                         "leader_count": configured.get(name, 0),
+                        "pinned": name in pinned,
                         "source": "chatlog",
                     }
                 )
@@ -525,10 +612,142 @@ class HubHandler(BaseHTTPRequestHandler):
         for name, count in configured.items():
             if not any(m["name"] == name for m in merged):
                 merged.append(
-                    {"name": name, "configured": True, "leader_count": count, "source": "config"}
+                    {
+                        "name": name,
+                        "configured": True,
+                        "leader_count": count,
+                        "pinned": name in pinned,
+                        "source": "config",
+                    }
                 )
 
+        # 置顶的群排最前（保持原有名称序），其余按名称排序
+        merged.sort(key=lambda m: (not m["pinned"], m["name"].lower()))
         self._json({"ok": True, "groups": merged})
+
+    def _api_contacts(self, query: Dict[str, List[str]]) -> None:
+        """返回好友 / 公众号列表，支持关键词筛选与条数上限。
+
+        Query:
+          - `category=friend|official`（默认 friend）
+          - `q=关键词`（按名称/备注/别名模糊匹配）
+          - `limit=N`（条数上限，默认 200，最大 500）
+
+        为什么必须限制条数：真机好友 3000+，全量返回约 260KB，前端要为每条
+        建 4 个 DOM 节点（上万个），页面会明显卡住、甚至看起来像「拉不到数据」。
+        这里默认截断，并用 total / matched / truncated 告诉前端全量有多大。
+        """
+        category = str((query.get("category") or ["friend"])[0]).strip().lower()
+        if category not in ("friend", "official"):
+            category = "friend"
+        q = str((query.get("q") or [""])[0]).strip()
+        try:
+            limit = int((query.get("limit") or ["200"])[0])
+        except (TypeError, ValueError):
+            limit = 200
+        limit = max(1, min(limit, 500))
+
+        client = shared_client(self.cfg)
+        contacts: List[Dict[str, Any]] = []
+        if client.health():
+            try:
+                contacts = client.get_contacts(category)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("读取联系人失败：%s", exc)
+
+        total = len(contacts)
+        if q:
+            needle = q.lower()
+            contacts = [
+                c
+                for c in contacts
+                if needle in str(c.get("name", "")).lower()
+                or needle in str(c.get("remark", "")).lower()
+                or needle in str(c.get("alias", "")).lower()
+            ]
+        matched = len(contacts)
+        self._json(
+            {
+                "ok": True,
+                "category": category,
+                "q": q,
+                "limit": limit,
+                "total": total,
+                "matched": matched,
+                "truncated": matched > limit,
+                "contacts": contacts[:limit],
+            }
+        )
+
+    def _api_toggle_pin(self) -> None:
+        """切换某群的置顶状态。请求体：`{"group": "群名", "pinned": true}`。"""
+        payload = self._read_body()
+        group = str(payload.get("group") or "").strip()
+        if not group:
+            return self._error("group 不能为空")
+        pinned = bool(payload.get("pinned", False))
+        try:
+            set_group_pinned(group, pinned)
+        except Exception as exc:  # noqa: BLE001
+            return self._error(f"置顶设置失败：{exc}", 500)
+        logger.info("群「%s」置顶状态 -> %s", group, pinned)
+        self._json({"ok": True, "group": group, "pinned": pinned})
+
+    # ---------- 模型配置（让不会手改 .env 的人也能用） ---------- #
+    def _api_model_get(self, query: Dict[str, List[str]]) -> None:
+        """回显当前模型配置。**Key 只返回打码形式**，明文永不下发。"""
+        try:
+            data = read_model_config(self.cfg)
+        except Exception as exc:  # noqa: BLE001
+            return self._error(f"读取模型配置失败：{exc}", 500)
+        self._json(data)
+
+    def _api_model_test(self) -> None:
+        """用一次极小请求验证 Key / 地址 / 模型名是否三者都对。
+
+        消耗：max_tokens=8，一次调用成本可以忽略。
+        """
+        payload = self._read_body()
+        api_key = str(payload.get("api_key") or "").strip()
+        # 前端回显的是打码值（含 *），或用户压根没改 → 用已保存的 Key 测
+        if not api_key or "*" in api_key:
+            api_key = saved_api_key()
+        result = test_connection(
+            api_key=api_key,
+            base_url=str(payload.get("base_url") or ""),
+            model=str(payload.get("model") or ""),
+        )
+        self._json(result)
+
+    def _api_model_save(self) -> None:
+        """保存模型配置到 .env 与 settings.yaml，并原地热更新运行中的配置。"""
+        payload = self._read_body()
+        provider = str(payload.get("provider") or "file_output").strip().lower()
+        api_key = str(payload.get("api_key") or "").strip()
+        if "*" in api_key:
+            api_key = saved_api_key()  # 打码回显值 → 沿用原 Key
+        elif not api_key and provider != "file_output":
+            api_key = saved_api_key()  # 在线模式留空 → 也沿用，避免误清
+
+        try:
+            result = save_model_config(
+                provider=provider,
+                api_key=api_key,
+                base_url=str(payload.get("base_url") or ""),
+                model=str(payload.get("model") or ""),
+            )
+        except ConfigError as exc:
+            return self._error(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return self._error(f"保存失败：{exc}", 500)
+
+        # 热更新：任务线程读的是同一个 cfg 字典，改完立刻生效，不必重启服务
+        try:
+            self.cfg.clear()
+            self.cfg.update(load_settings(reload_env=False))
+        except Exception as exc:  # noqa: BLE001 - 刷新失败不影响已落盘的配置
+            logger.warning("刷新内存配置失败：%s", exc)
+        self._json(result)
 
     def _api_groups_config(self, query: Dict[str, List[str]]) -> None:
         """返回 groups.yaml 原始结构，供前端「领导设置」面板展示。"""
@@ -548,7 +767,7 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error("leaders 必须是数组")
         try:
             save_group_leaders(group, leaders)
-        except ConfigError as exc:
+        except Exception as exc:  # 兜底：任何写入异常都返回可读错误，而非裸 500
             return self._error(f"保存失败：{exc}", 500)
         logger.info("控制台更新了群「%s」的领导名单（%d 人）", group, len(leaders))
         self._json({"ok": True, "group": group, "leader_count": len(leaders)})
@@ -683,6 +902,14 @@ def build(
             continue
     else:
         raise PipelineError(f"端口 {bind_port}-{bind_port + 11} 都被占用了，请在 settings.yaml 里换一个")
+
+    # 启动自动刷新守护线程（若开启），周期性检测解密库是否过期
+    try:
+        ar = (cfg.get("chatlog") or {}).get("auto_refresh") or {}
+        if ar.get("enabled", True):
+            get_refresher(cfg).start()
+    except Exception as exc:  # noqa: BLE001 - 守护线程起不来不影响服务
+        logger.debug("自动刷新守护线程启动失败：%s", exc)
 
     url = f"http://{bind_host}:{server.server_address[1]}"
     return server, url

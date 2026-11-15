@@ -38,7 +38,12 @@ asr:
   # 总开关：false 时所有语音直接降级为 [语音]
   enabled: true
   # faster-whisper 模型名：tiny / base / small / medium / large-v3
-  model: "large-v3"
+  #
+  # 默认用 small（约 490MB，首次运行自动下载）：中文识别够用、CPU 也能跑。
+  # 往上调到 medium（~1.5GB）/ large-v3（~3GB）识别更准，但明显更吃内存和时间；
+  # 往下 tiny（~75MB）最快，只适合听个大概。
+  # 如果你没有 GPU，别一上来就用 large-v3 —— 一条 1 分钟的语音可能要转半分钟以上。
+  model: "small"
   device: "cpu"
   compute_type: "int8"
   # 识别语言，留空自动检测
@@ -85,7 +90,8 @@ summarizer:
   provider: "deepseek"
   # 使用的 prompt 模板名（对应 config/prompts/<name>.md）
   prompt_template: "leader_brief"
-  # 在线模式下使用的模型（deepseek-flash 为当前推荐，deepseek-chat 已弃用）
+  # 在线模式下使用的模型名。填错不会崩，但总结会失败，所以改完建议在
+  # 控制台「模型设置」里点一次「测试连接」验证；DeepSeek 常用 deepseek-chat。
   model: "deepseek-chat"
   # file_output 模式下待处理文件的落盘目录
   pending_dir: "./runs/pending"

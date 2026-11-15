@@ -57,6 +57,9 @@ def _render_one(msg: Message, show_leader_tag: bool) -> str:
             "voice": "[语音：未能转写]",
             "image": "[图片：未能识别]",
             "article": "[链接：未能解析]",
+            "file": "[文件]",
+            "emoji": "[表情]",
+            "video": "[视频]",
         }.get(msg.msg_type, "[无文字内容]")
 
     return f"{header}\n{content}"

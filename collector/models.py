@@ -20,6 +20,7 @@ TYPE_ARTICLE = "article"
 TYPE_VIDEO = "video"
 TYPE_FILE = "file"
 TYPE_SYSTEM = "system"
+TYPE_EMOJI = "emoji"
 TYPE_UNKNOWN = "unknown"
 
 # 微信原始 MsgType -> 本项目类型
@@ -28,7 +29,7 @@ WX_TYPE_MAP: Dict[int, str] = {
     3: TYPE_IMAGE,
     34: TYPE_VOICE,
     43: TYPE_VIDEO,
-    47: TYPE_UNKNOWN,      # 表情包 / 大表情
+    47: TYPE_EMOJI,        # 表情包 / 大表情（内容是 <msg><emoji .../> XML）
     49: TYPE_ARTICLE,      # 复合消息（公众号链接、文件、引用等），按 subType 细分
     10000: TYPE_SYSTEM,
 }
@@ -42,6 +43,7 @@ TYPE_LABEL: Dict[str, str] = {
     TYPE_VIDEO: "视频",
     TYPE_FILE: "文件",
     TYPE_SYSTEM: "系统",
+    TYPE_EMOJI: "表情",
     TYPE_UNKNOWN: "其他",
 }
 

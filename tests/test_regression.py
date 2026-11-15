@@ -398,3 +398,64 @@ class TestChatlogV4Mapping(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_sqlite_client_required_methods():
+    """结构守卫：SqliteClient 必须真的挂载这些方法。
+
+    背景（2026-11-05 事故）：向类中间插入模块级函数会把类提前截断，
+    后面的方法会变成该函数的嵌套函数，表现为
+    `'SqliteClient' object has no attribute 'get_messages'`——
+    群列表正常、但一生成报告就「拉取聊天记录失败」。这条用例专门防止复发。
+    """
+    from collector.sqlite_client import SqliteClient
+
+    required = ("get_groups", "get_messages", "get_contacts", "_resolve_wxid", "_render")
+    missing = [name for name in required if not hasattr(SqliteClient, name)]
+    assert not missing, f"SqliteClient 缺少方法（类可能被模块级函数截断）：{missing}"
+
+
+def test_render_never_leaks_xml():
+    """结构守卫：任何类型的原始内容都不该把 XML 原样当正文吐出去。"""
+    from collector.sqlite_client import SqliteClient
+    from collector.models import TYPE_SYSTEM
+
+    content, _ = SqliteClient._render(TYPE_SYSTEM, '<sysmsg type="x"><plain><![CDATA[]]></plain></sysmsg>')
+    assert "<" not in content
+    content2, _ = SqliteClient._render("unknown_type", "<foobar>raw xml</foobar>")
+    assert "<" not in content2
+
+
+def test_render_emoji_and_media():
+    """守卫：表情包不能漏 XML，语音/图片/视频要带出可用元信息。
+
+    背景（2026-11-09）：local_type=47（表情包）被映射成 TYPE_TEXT，
+    导致 <msg><emoji .../></msg> 整段 XML 当正文进了报告；
+    语音/图片也只剩 [语音]/[图片] 两个干巴巴的占位。
+    """
+    from collector.models import TYPE_EMOJI, TYPE_IMAGE, TYPE_VIDEO, TYPE_VOICE
+    from collector.sqlite_client import _TYPE_MAP, SqliteClient
+
+    assert _TYPE_MAP[47] == TYPE_EMOJI, "local_type=47 必须映射为 emoji"
+
+    emoji, _ = SqliteClient._render(
+        TYPE_EMOJI, '<msg><emoji fromusername="x" type="2" md5="abc" len="100"/></msg>'
+    )
+    assert emoji == "[表情]", emoji
+
+    voice, _ = SqliteClient._render(
+        TYPE_VOICE, '<msg><voicemsg voicelength="5829" voiceformat="4"/></msg>'
+    )
+    assert "″" in voice and "<" not in voice, voice
+
+    image, _ = SqliteClient._render(
+        TYPE_IMAGE,
+        '<msg><img aeskey="e" encryver="1" cdnthumbwidth="215" cdnthumbheight="480" '
+        'md5="8a198b6bf1a7096bc1472aacc7631d4a"/></msg>',
+    )
+    assert "215×480" in image and "<" not in image, image
+
+    video, _ = SqliteClient._render(
+        TYPE_VIDEO, '<msg><videomsg playlength="4" length="8340342"/></msg>'
+    )
+    assert "″" in video and "<" not in video, video

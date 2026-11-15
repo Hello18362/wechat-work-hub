@@ -28,6 +28,7 @@ __pycache__/
 venv/
 build/
 dist/
+*.spec
 *.egg-info/
 
 # 编辑器 / 系统
@@ -35,3 +36,21 @@ dist/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 其他工具 / 与本项目无关的本地目录（不提交，也不导出给他人）
+.opencode/
+证据/
+
+# 旧启动脚本备份（本机回退用，不发布）
+_旧脚本备份/
+
+# 对外分享版报告（含真实聊天摘要，绝不入库/发布）
+share/
+
+# 公开发布时必须排除（含真实群名/昵称、私有材料、未施工的效果图）
+# 注：这些文件在本机继续使用，只是不进公开仓库。
+config/groups.yaml
+config/pins.yaml
+给老师/
+preview_*.png
+docs/

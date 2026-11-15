@@ -216,6 +216,95 @@ body.is-scrolled .nav-sub{max-height:0;opacity:0}
 .pop-item.is-active{background:var(--ink);color:var(--bg);font-weight:700}
 .pop-item .tag{margin-left:auto;font-size:11px;color:var(--ink-3)}
 .pop-item.is-active .tag{color:rgba(255,255,255,.7)}
+/* 列表顶部说明条：说明「共多少个 / 隐藏了多少」，右侧带显示开关 */
+.pop-hint{
+  position:sticky;top:0;z-index:1;
+  display:flex;align-items:center;gap:8px;
+  background:var(--bg);
+  color:var(--ink-3);
+  font-size:11.5px;line-height:1.45;
+  padding:6px 10px;
+  border-bottom:1px solid var(--line);
+  cursor:default;
+}
+.pop-hint:hover{background:var(--bg)}
+.pop-hint:active{transform:none}
+.hint-toggle{
+  margin-left:auto;flex:none;
+  font:inherit;font-size:11px;font-weight:700;
+  padding:2px 9px;border-radius:6px;
+  border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--ink-2);
+  cursor:pointer;
+  transition:background .2s var(--out),color .2s var(--out),transform .2s var(--spring),border-color .2s var(--out);
+}
+.hint-toggle:hover{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.hint-toggle:active{transform:scale(.94)}
+
+/* 联系人列表项：名称 + 副标题两行，右侧类型标签 */
+.contact-item{align-items:center}
+.contact-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ink-3)}
+.contact-text{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.contact-main{
+  font-size:13px;line-height:1.35;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.contact-sub{
+  font-size:10.5px;line-height:1.3;color:var(--ink-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.contact-item.is-active .contact-sub{color:rgba(255,255,255,.65)}
+
+/* 联系人详情弹窗 */
+.contact-card{width:min(420px,100%)}
+.contact-head{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.contact-avatar{
+  width:44px;height:44px;flex:none;border-radius:13px;
+  display:grid;place-items:center;
+  background:var(--ink);color:var(--bg);
+  font-size:18px;font-weight:800;
+}
+.contact-ident{min-width:0;flex:1}
+.contact-name{
+  font-size:16px;font-weight:800;line-height:1.3;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.contact-desc{font-size:11.5px;color:var(--ink-3);line-height:1.45;margin-top:2px}
+.contact-type{
+  flex:none;font-size:11px;font-weight:700;
+  padding:3px 9px;border-radius:999px;
+  background:var(--surface-2);color:var(--ink-2);
+}
+.contact-fields{margin:0 0 16px;display:flex;flex-direction:column;gap:1px}
+.contact-fields>div{
+  display:flex;gap:12px;align-items:flex-start;
+  padding:9px 0;border-bottom:1px solid var(--line);
+}
+.contact-fields>div:last-child{border-bottom:none}
+.contact-fields dt{
+  flex:none;width:64px;font-size:12px;color:var(--ink-3);
+}
+.contact-fields dd{
+  margin:0;flex:1;min-width:0;font-size:12.5px;
+  word-break:break-all;line-height:1.5;
+}
+.contact-hint{margin:0;font-size:11.5px;color:var(--ink-3);line-height:1.5}
+
+/* 好友/公众号/群聊 tab 切换 */
+.pop-tabs{display:flex;gap:4px;margin-bottom:8px;padding:2px;background:var(--surface-2);border-radius:9px}
+.pop-tab{
+  flex:1;padding:6px 0;border:none;border-radius:7px;background:none;color:var(--ink-3);
+  font-size:12.5px;font-weight:600;cursor:pointer;transition:background .2s var(--out),color .2s var(--out);
+}
+.pop-tab.is-on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-sm)}
+.pop-tab:active{transform:scale(.97)}
+
+/* 置顶分组标题 */
+.pop-section-title{
+  padding:6px 10px 4px;font-size:11px;font-weight:700;color:var(--ink-3);
+  letter-spacing:.04em;border-top:1px solid var(--line);margin-top:6px;
+}
+.pop-section-title:first-child{border-top:none;margin-top:0}
 
 /* 日历（01-14） */
 .pop-cal{width:280px;padding:12px}
@@ -365,6 +454,15 @@ body.is-scrolled .nav-sub{max-height:0;opacity:0}
   padding:2px 8px;border-radius:999px;background:var(--surface-3);font-size:11px;color:var(--ink-2);
 }
 .run-badge.is-html{background:var(--ink);color:var(--bg)}
+.run-view-btn{
+  margin-left:auto;padding:6px 14px;border-radius:8px;border:none;cursor:pointer;
+  background:var(--accent);color:#fff;font-size:12px;font-weight:700;letter-spacing:.01em;
+  transition:transform .2s var(--spring),box-shadow .2s var(--out),opacity .2s var(--out);
+  box-shadow:0 2px 8px color-mix(in srgb,var(--accent) 35%,transparent);
+}
+.run-view-btn:hover{transform:translateY(-1px);box-shadow:0 4px 14px color-mix(in srgb,var(--accent) 45%,transparent)}
+.run-view-btn:active{transform:scale(.96)}
+.run-time{font-variant-numeric:tabular-nums}
 .empty{
   padding:44px 20px;text-align:center;color:var(--ink-3);font-size:13.5px;
   border:1px dashed var(--line-strong);border-radius:var(--radius);
@@ -474,4 +572,75 @@ body.is-scrolled .nav-sub{max-height:0;opacity:0}
 
 @media(prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}
+
+/* ===========================================================================
+   模型设置：导航入口 + 配置面板
+   · 入口常驻，用一个小圆点表示「在线就绪 / 离线模式」，不额外占版面
+   · 面板沿用 modal-card 的弹出手感，和「领导设置」「联系人」保持一致
+   =========================================================================== */
+.nav-model{
+  display:inline-flex;align-items:center;gap:7px;
+  height:34px;padding:0 12px;margin-left:4px;
+  border-radius:999px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink-2);
+  font-size:12.5px;font-weight:600;
+  transition:transform .2s var(--spring),border-color .2s var(--out),color .2s var(--out);
+}
+.nav-model:hover{border-color:var(--line-strong);color:var(--ink)}
+.nav-model:active{transform:scale(.955)}
+.nav-model-dot{
+  width:7px;height:7px;border-radius:50%;background:var(--ink-3);
+  transition:background .24s var(--out),box-shadow .24s var(--out);
+}
+.nav-model-dot[data-state="online"]{background:var(--ok);box-shadow:0 0 0 3px rgba(31,157,85,.16)}
+.nav-model-dot[data-state="offline"]{background:var(--ink-3)}
+
+.model-card{width:min(560px,100%);max-height:86vh;overflow:auto}
+.model-lead{
+  margin:0 0 16px;padding:10px 12px;border-radius:var(--radius-sm);
+  background:var(--surface-2);border:1px solid var(--line);
+  font-size:12.5px;line-height:1.65;color:var(--ink-2);
+}
+.model-field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;min-width:0}
+.model-label{font-size:12px;font-weight:700;color:var(--ink-2);letter-spacing:.02em}
+.model-input{
+  width:100%;height:38px;padding:0 12px;border-radius:10px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--ink);
+  font-family:inherit;font-size:13px;
+  transition:border-color .2s var(--out),background .2s var(--out);
+}
+.model-input:focus{outline:none;border-color:var(--line-strong);background:var(--surface)}
+select.model-input{appearance:none;cursor:pointer}
+.model-hint{font-size:11.5px;line-height:1.55;color:var(--ink-3)}
+.model-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+.model-status{
+  display:flex;flex-direction:column;gap:3px;
+  padding:11px 13px;border-radius:var(--radius-sm);margin-bottom:14px;
+  border:1px solid var(--line);background:var(--surface-2);
+  animation:modelIn .28s var(--spring) both;
+}
+.model-status[data-state="ok"]{border-color:rgba(31,157,85,.35);background:rgba(31,157,85,.07)}
+.model-status[data-state="err"]{border-color:rgba(211,60,60,.32);background:rgba(211,60,60,.06)}
+.model-status-title{font-size:12.5px;font-weight:700}
+.model-status[data-state="ok"] .model-status-title{color:var(--ok)}
+.model-status[data-state="err"] .model-status-title{color:var(--err)}
+.model-status-detail{
+  font-size:11.5px;line-height:1.6;color:var(--ink-2);
+  white-space:pre-wrap;word-break:break-word;
+}
+
+.model-foot{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.model-foot-note{font-size:11.5px;color:var(--ink-3)}
+.model-foot-btns{display:flex;gap:8px}
+
+@keyframes modelIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+@media (max-width:560px){
+  .model-row{grid-template-columns:1fr}
+  .nav-model-text{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .model-status{animation:none}
 }

@@ -4,7 +4,7 @@
 `print()` 会抛 AttributeError 直接把服务打死。这里先把输出重定向到
 `logs/console.out`，再启动控制台，从而支持「关掉窗口也在跑」。
 
-用法（由 后台启动.bat 调用）：
+用法（由 一键启动.bat / 开机自启调用）：
     pythonw.exe tools\\serve_hidden.py
 """
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -87,8 +88,13 @@ def setup_logging(cfg: Dict[str, Any]) -> logging.Logger:
     max_bytes = int(dig(cfg, "logging.max_bytes", 5242880) or 5242880)
     backup = int(dig(cfg, "logging.backup_count", 5) or 5)
 
-    # 控制台
-    console = logging.StreamHandler(sys.stdout)
+    # 控制台。注意：PyInstaller --windowed（pythonw）下 sys.stdout / sys.stderr
+    # 可能为 None，直接传给 StreamHandler 会在 emit 时 AttributeError，
+    # 这里兜底到 devnull，保证打包成桌面软件后日志初始化不崩。
+    _stream = sys.stdout or sys.stderr
+    if _stream is None:
+        _stream = open(os.devnull, "w", encoding="utf-8")
+    console = logging.StreamHandler(_stream)
     console.setFormatter(ConsoleFormatter(color=_supports_color()))
     console.setLevel(logger.level)
     logger.addHandler(console)

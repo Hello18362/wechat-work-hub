@@ -32,7 +32,18 @@
     group: '', date: 'today', template: 'leader_brief',
     leadersOnly: false, taskId: '', polling: null,
     // 领导设置面板的临时态
-    leadersDraft: [], groupsConfig: { target_groups: [], global_leaders: [] }
+    leadersDraft: [], groupsConfig: { target_groups: [], global_leaders: [] },
+    // 好友 / 公众号列表 + 当前选中的联系人分类
+    // contactsMeta 记录「全量多少、匹配多少、是否被截断、是否已加载完」，
+    // 用于在列表顶部给出明确说明，避免用户误以为「一条都没拉到」。
+    contactsTab: 'group', friends: [], officials: [],
+    contactsMeta: {
+      friend: { total: 0, matched: 0, truncated: false, loaded: false, q: '' },
+      official: { total: 0, matched: 0, truncated: false, loaded: false, q: '' }
+    },
+    // 是否显示「无有效昵称」的联系人（无备注 + 昵称纯数字/纯符号），默认隐藏
+    showNoisy: false,
+    contactCurrent: null
   };
 
   /* ------------------------------------------------------------------ API */
@@ -184,7 +195,12 @@
           open = [btn, pop];
           if (pop.id === 'datePop') renderCalendar();
           var search = $('#groupSearch');
-          if (pop.id === 'groupPop' && search) setTimeout(function () { search.focus(); }, 30);
+          if (pop.id === 'groupPop' && search) {
+            setTimeout(function () { search.focus(); }, 30);
+            // 打开时按当前 tab 渲染（默认群聊）
+            if (state.contactsTab === 'group') renderGroupList('');
+            else switchContactsTab(state.contactsTab);
+          }
         }
       });
       pop.addEventListener('click', function (ev) { ev.stopPropagation(); });
@@ -199,9 +215,14 @@
     var list = $('#groupList');
     list.innerHTML = '';
     var kw = (keyword || '').trim().toLowerCase();
+    // 置顶群排最前（后端已排好序，这里再兜底一次），再按名称
     var items = state.groups.filter(function (g) {
       return !kw || g.name.toLowerCase().indexOf(kw) >= 0;
+    }).slice().sort(function (a, b) {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+      return a.name.localeCompare(b.name, 'zh');
     });
+
     if (!items.length) {
       var li = document.createElement('li');
       li.className = 'pop-item';
@@ -210,7 +231,12 @@
       list.appendChild(li);
       return;
     }
-    items.forEach(function (g) {
+
+    // 置顶分组标题
+    var pinnedItems = items.filter(function (g) { return g.pinned; });
+    var normalItems = items.filter(function (g) { return !g.pinned; });
+
+    function buildItem(g) {
       var li = document.createElement('li');
       li.className = 'pop-item' + (g.name === state.group ? ' is-active' : '');
       var dot = document.createElement('span');
@@ -222,7 +248,20 @@
       var tag = document.createElement('span');
       tag.className = 'tag';
       tag.textContent = g.configured ? '已关注 ' + g.leader_count + ' 人' : '未设关注人';
-      li.appendChild(dot); li.appendChild(name); li.appendChild(tag);
+      // 置顶图钉按钮
+      var pin = document.createElement('button');
+      pin.className = 'pin-btn' + (g.pinned ? ' is-on' : '');
+      pin.textContent = g.pinned ? '📌' : '📌';
+      pin.title = g.pinned ? '取消置顶' : '置顶';
+      pin.setAttribute('type', 'button');
+      pin.style.cssText = 'flex:none;background:none;border:none;cursor:pointer;font-size:13px;' +
+        (g.pinned ? 'opacity:1' : 'opacity:.28') +
+        ';transition:transform .2s var(--spring),opacity .2s var(--out)';
+      pin.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        togglePin(g, pin);
+      });
+      li.appendChild(dot); li.appendChild(name); li.appendChild(tag); li.appendChild(pin);
       li.addEventListener('click', function () {
         state.group = g.name;
         $('#groupLabel').textContent = g.name;
@@ -238,6 +277,263 @@
         }
       });
       list.appendChild(li);
+    }
+
+    if (pinnedItems.length) {
+      var h1 = document.createElement('li');
+      h1.className = 'pop-section-title';
+      h1.textContent = '📌 置顶';
+      list.appendChild(h1);
+      pinnedItems.forEach(buildItem);
+    }
+    if (normalItems.length && pinnedItems.length) {
+      var h2 = document.createElement('li');
+      h2.className = 'pop-section-title';
+      h2.textContent = '其他群聊';
+      list.appendChild(h2);
+    }
+    normalItems.forEach(buildItem);
+  }
+
+  function togglePin(g, pinEl) {
+    api('/api/groups/pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group: g.name, pinned: !g.pinned })
+    }).then(function (data) {
+      g.pinned = data.pinned;
+      pinEl.style.opacity = g.pinned ? '1' : '.28';
+      pinEl.classList.toggle('is-on', g.pinned);
+      toast(g.pinned ? '已置顶：' + g.name : '已取消置顶：' + g.name);
+      renderGroupList($('#groupSearch').value);
+    }).catch(function (e) { toast('置顶失败：' + e.message, { kind: 'err' }); });
+  }
+
+  /* ------------------------------------------------- 好友 / 公众号列表 */
+  function renderContactList(keyword) {
+    var list = $('#groupList');
+    list.innerHTML = '';
+    var kw = (keyword || '').trim().toLowerCase();
+    var isOff = state.contactsTab === 'official';
+    var src = isOff ? state.officials : state.friends;
+    var meta = state.contactsMeta[state.contactsTab] || { total: 0, matched: 0, truncated: false, loaded: false };
+
+    // 无辨识度条目（无备注 + 昵称纯数字/纯符号）默认隐藏，可一键显示
+    var noisyTotal = 0;
+    var items = src.filter(function (c) {
+      if (!isOff && c.noisy) {
+        noisyTotal++;
+        if (!state.showNoisy) return false;
+      }
+      var name = (c.display || c.name || '').toLowerCase();
+      var remark = (c.remark || '').toLowerCase();
+      return !kw || name.indexOf(kw) >= 0 || remark.indexOf(kw) >= 0;
+    });
+
+    // 顶部说明条：把「共多少个 / 隐藏了多少 / 为什么只有这些」说清楚
+    var tip = document.createElement('li');
+    tip.className = 'pop-item pop-hint';
+    var tipText = document.createElement('span');
+    if (!meta.loaded) {
+      tipText.textContent = '加载中…';
+    } else if (kw) {
+      tipText.textContent = '匹配 ' + items.length + ' 个';
+    } else {
+      var parts = ['共 ' + (meta.total || src.length) + ' 个'];
+      if (meta.truncated) parts.push('仅显示前 ' + src.length + ' 个');
+      if (noisyTotal) {
+        parts.push((state.showNoisy ? '已显示' : '已隐藏') + ' ' + noisyTotal + ' 个无有效昵称');
+      }
+      tipText.textContent = parts.join(' · ');
+    }
+    tip.appendChild(tipText);
+    if (noisyTotal && !kw) {
+      var toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'hint-toggle';
+      toggle.textContent = state.showNoisy ? '隐藏' : '显示';
+      toggle.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        state.showNoisy = !state.showNoisy;
+        renderContactList($('#groupSearch').value);
+      });
+      tip.appendChild(toggle);
+    }
+    list.appendChild(tip);
+
+    if (!items.length) {
+      var empty = document.createElement('li');
+      empty.className = 'pop-item';
+      empty.style.color = 'var(--ink-3)';
+      if (!meta.loaded && !src.length) empty.textContent = '加载中…';
+      else if (kw) empty.textContent = '没有匹配的' + (isOff ? '公众号' : '好友');
+      else if (!meta.total) empty.textContent = '没有读到' + (isOff ? '公众号' : '好友') + '（数据源可能未刷新）';
+      else empty.textContent = '没有匹配的' + (isOff ? '公众号' : '好友');
+      list.appendChild(empty);
+      return;
+    }
+
+    items.forEach(function (c) {
+      var li = document.createElement('li');
+      li.className = 'pop-item contact-item';
+      li.setAttribute('role', 'button');
+      li.tabIndex = 0;
+
+      var dot = document.createElement('span');
+      dot.className = 'contact-dot';
+
+      var text = document.createElement('div');
+      text.className = 'contact-text';
+      var main = document.createElement('span');
+      main.className = 'contact-main';
+      main.textContent = c.display || c.name || c.id || '(无名称)';
+      text.appendChild(main);
+
+      // 副标题：备注和昵称不同则显示昵称；无辨识度的显示微信号尾号便于区分
+      var subText = '';
+      if (c.remark && c.nick && c.remark !== c.nick) subText = c.nick;
+      else if (c.noisy) subText = '微信号 ' + String(c.id || '').slice(-8);
+      if (subText) {
+        var sub = document.createElement('span');
+        sub.className = 'contact-sub';
+        sub.textContent = subText;
+        text.appendChild(sub);
+      }
+
+      var tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = isOff ? '公众号' : (c.noisy ? '无备注' : '好友');
+
+      li.appendChild(dot);
+      li.appendChild(text);
+      li.appendChild(tag);
+
+      function activate() {
+        openContact(c);
+        $('#groupPop').hidden = true;
+        $('#groupBtn').setAttribute('aria-expanded', 'false');
+      }
+      li.addEventListener('click', activate);
+      li.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          activate();
+        }
+      });
+      list.appendChild(li);
+    });
+  }
+
+  /* --------------------------------------------------- 联系人详情弹窗 */
+  function openContact(c) {
+    state.contactCurrent = c;
+    var root = $('#contactRoot');
+    var name = c.display || c.name || c.id || '(无名称)';
+    $('#contactName').textContent = name;
+    $('#contactAvatar').textContent = String(name).slice(0, 1);
+    $('#contactSub').textContent = c.noisy
+      ? '无备注、昵称也无有效内容，展示名已退化为微信号'
+      : (c.remark && c.nick && c.remark !== c.nick ? '微信昵称：' + c.nick : '');
+    $('#contactRemark').textContent = c.remark || '—';
+    $('#contactNick').textContent = c.nick || '—';
+    $('#contactWxid').textContent = c.alias || c.id || '—';
+    $('#contactType').textContent = state.contactsTab === 'official' ? '公众号' : '好友';
+    root.hidden = false;
+    var scrim = $('.scrim', root);
+    if (scrim) scrim.classList.add('is-on');
+    setTimeout(function () { $('#contactClose').focus(); }, 60);
+  }
+
+  function closeContact() {
+    var root = $('#contactRoot');
+    root.hidden = true;
+    var scrim = $('.scrim', root);
+    if (scrim) scrim.classList.remove('is-on');
+  }
+
+  function copyContactText(which) {
+    var c = state.contactCurrent;
+    if (!c) return;
+    var txt = which === 'name' ? (c.display || c.name || '') : (c.alias || c.id || '');
+    if (!txt) {
+      toast('没有可复制的内容', { kind: 'err' });
+      return;
+    }
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      toast('已复制：' + txt);
+    } catch (e) {
+      toast('复制失败，请手动选择文本', { kind: 'err' });
+    }
+  }
+
+  function initContactModal() {
+    var root = $('#contactRoot');
+    if (!root) return;
+    $('#contactClose').addEventListener('click', closeContact);
+    var scrim = $('.scrim', root);
+    if (scrim) scrim.addEventListener('click', closeContact);
+    $('#contactCopy').addEventListener('click', function () { copyContactText('wxid'); });
+    $('#contactCopyName').addEventListener('click', function () { copyContactText('name'); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !root.hidden) closeContact();
+    });
+  }
+
+  function switchContactsTab(tab) {
+    state.contactsTab = tab;
+    $$('#groupPop .pop-tab').forEach(function (b) {
+      b.classList.toggle('is-on', b.getAttribute('data-tab') === tab);
+    });
+    var search = $('#groupSearch');
+    search.placeholder = tab === 'group' ? '搜索群名…'
+      : tab === 'official' ? '搜索公众号…' : '搜索好友…';
+    search.value = '';
+    if (tab === 'group') {
+      renderGroupList('');
+    } else {
+      // 用 loaded 判断而不是 length：搜索无结果时 length 为 0，
+      // 用 length 会导致每次切 tab 都重新请求一次。
+      if (!state.contactsMeta[tab].loaded) loadContacts(tab, '');
+      renderContactList('');
+    }
+  }
+
+  function loadContacts(category, keyword) {
+    var kw = keyword || '';
+    var qs = '/api/contacts?category=' + encodeURIComponent(category)
+      + '&limit=200&q=' + encodeURIComponent(kw);
+    return api(qs).then(function (data) {
+      if (category === 'official') state.officials = data.contacts || [];
+      else state.friends = data.contacts || [];
+      state.contactsMeta[category] = {
+        total: data.total || 0,
+        matched: typeof data.matched === 'number' ? data.matched : (data.contacts || []).length,
+        truncated: !!data.truncated,
+        loaded: true,
+        q: data.q || ''
+      };
+      if (state.contactsTab === category) renderContactList($('#groupSearch').value);
+    }).catch(function (e) {
+      // 失败也要把 loaded 置位，否则界面会永远停在「加载中…」
+      if (state.contactsMeta[category]) state.contactsMeta[category].loaded = true;
+      if (state.contactsTab === category) renderContactList($('#groupSearch').value);
+      toast('联系人加载失败：' + e.message, { kind: 'err' });
+    });
+  }
+
+  function initContactsTabs() {
+    $$('#groupPop .pop-tab').forEach(function (b) {
+      b.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        switchContactsTab(b.getAttribute('data-tab'));
+      });
     });
   }
 
@@ -297,16 +593,25 @@
   }
 
   /* --------------------------------------------------- 模板列表 */
+  // 模板英文文件名 -> 中文显示名
+  var TPL_NAMES = {
+    daily_digest: '晨读日报',
+    leader_brief: '领导简报',
+    todo_list: '待办清单'
+  };
+  function tplLabel(name) { return TPL_NAMES[name] || name; }
+
   function renderTemplateList() {
     var list = $('#tplList');
     list.innerHTML = '';
     (state.templates.length ? state.templates : ['leader_brief']).forEach(function (name) {
       var li = document.createElement('li');
       li.className = 'pop-item' + (name === state.template ? ' is-active' : '');
-      li.textContent = name;
+      li.textContent = tplLabel(name);
+      li.setAttribute('data-tpl', name);
       li.addEventListener('click', function () {
         state.template = name;
-        $('#tplLabel').textContent = name;
+        $('#tplLabel').textContent = tplLabel(name);
         $('#tplPop').hidden = true;
         $('#tplBtn').setAttribute('aria-expanded', 'false');
       });
@@ -590,8 +895,22 @@
       badge2.textContent = 'HTML';
       foot.appendChild(badge2);
     }
+    // 醒目的「查看报告」入口：有 HTML 时直接新窗口打开，否则打开 Markdown 详情
+    var viewBtn = document.createElement('button');
+    viewBtn.className = 'run-view-btn';
+    viewBtn.textContent = run.html ? '查看 HTML 报告' : '查看报告';
+    viewBtn.setAttribute('type', 'button');
+    viewBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      if (run.html) {
+        window.open('/reports/' + encodeURIComponent(run.html), '_blank');
+      } else {
+        openDetail(card, run);
+      }
+    });
+    foot.appendChild(viewBtn);
     var time = document.createElement('span');
-    time.style.marginLeft = 'auto';
+    time.className = 'run-time';
     time.textContent = ago(run.mtime);
     foot.appendChild(time);
 
@@ -791,16 +1110,18 @@
   function openLeaders() {
     if (!state.group) { toast('先选择一个目标群聊', { kind: 'err' }); return; }
     $('#leadersGroup').textContent = state.group;
-    // 从原始配置里找到当前群已有的领导
-    var cfg = state.groupsConfig.target_groups || [];
-    var hit = cfg.filter(function (g) { return g.name === state.group; })[0];
-    state.leadersDraft = (hit && hit.leaders ? hit.leaders : []).map(function (l) {
-      return { name: l.name || '', id: l.id || '' };
+    // 每次打开都先拉最新配置，避免读到过期的名单（例如刚保存完又重新打开）
+    loadGroupsConfig().then(function () {
+      var cfg = state.groupsConfig.target_groups || [];
+      var hit = cfg.filter(function (g) { return g.name === state.group; })[0];
+      state.leadersDraft = (hit && hit.leaders ? hit.leaders : []).map(function (l) {
+        return { name: l.name || '', id: l.id || '' };
+      });
+      renderLeadersList();
+      leadersRoot.hidden = false;
+      $('.scrim', leadersRoot).classList.add('is-on');
+      setTimeout(function () { $('#leaderName').focus(); }, 60);
     });
-    renderLeadersList();
-    leadersRoot.hidden = false;
-    $('.scrim', leadersRoot).classList.add('is-on');
-    setTimeout(function () { $('#leaderName').focus(); }, 60);
   }
 
   function closeLeaders() {
@@ -840,8 +1161,11 @@
         body: JSON.stringify({ group: state.group, leaders: state.leadersDraft })
       }).then(function (data) {
         toast('已保存：关注 ' + data.leader_count + ' 人');
-        // 刷新群列表里的「领导 N 人」标注
-        loadGroups();
+        // 先刷新配置，确保再次打开面板读到最新名单；再刷新群列表标注；最后关弹窗
+        return loadGroupsConfig();
+      }).then(function () {
+        return loadGroups();
+      }).then(function () {
         closeLeaders();
       }).catch(function (e) { toast('保存失败：' + e.message, { kind: 'err' }); });
     });
@@ -903,6 +1227,182 @@
     bar.style.transform = 'translateY(' + railItems[index].offsetTop + 'px)';
   }
 
+  /* ----------------------------------- 模型设置（不会手改配置的人也能用） */
+  var modelRoot = $('#modelRoot');
+  var modelData = { presets: [] };
+
+  function modelPickId(data) {
+    if (!data || data.provider === 'file_output') return 'file_output';
+    var base = (data.base_url || '').replace(/\/+$/, '');
+    var hit = (data.presets || []).filter(function (p) {
+      return p.base_url && p.base_url.replace(/\/+$/, '') === base;
+    })[0];
+    return hit ? hit.id : 'custom';
+  }
+
+  // 后端只认 deepseek / doubao / openai / file_output，其余兼容服务统一归到 openai
+  function modelServerProvider(id) {
+    if (id === 'file_output' || id === 'deepseek' || id === 'doubao') return id;
+    return 'openai';
+  }
+
+  function modelApplyPreset(id) {
+    var hint = $('#modelProviderHint');
+    if (id === 'file_output') {
+      hint.textContent = '不填 Key 也能生成完整报告，只是「总结」需要你自己复制粘贴一次。';
+      return;
+    }
+    var p = (modelData.presets || []).filter(function (x) { return x.id === id; })[0];
+    if (!p) return;
+    if (p.base_url) $('#modelBase').value = p.base_url;
+    if (p.model) $('#modelName').value = p.model;
+    hint.textContent = p.note || ('在 ' + (p.key_url || '服务商控制台') + ' 申请 Key');
+  }
+
+  function modelSetStatus(state, title, detail) {
+    var box = $('#modelStatus');
+    box.hidden = false;
+    box.dataset.state = state;
+    $('#modelStatusTitle').textContent = title || '';
+    $('#modelStatusDetail').textContent = detail || '';
+  }
+
+  function modelFill(data) {
+    modelData = data || { presets: [] };
+    var sel = $('#modelProvider');
+    sel.innerHTML = '';
+    var off = document.createElement('option');
+    off.value = 'file_output';
+    off.textContent = '不使用在线模型（离线模式）';
+    sel.appendChild(off);
+    (modelData.presets || []).forEach(function (p) {
+      var o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.label;
+      sel.appendChild(o);
+    });
+    var picked = modelPickId(modelData);
+    sel.value = picked;
+
+    $('#modelBase').value = modelData.base_url || '';
+    $('#modelName').value = modelData.model || '';
+    $('#modelKey').value = '';
+    $('#modelKey').placeholder = modelData.has_key
+      ? ('已保存：' + modelData.key_hint + '（留空则沿用）')
+      : '粘贴你自己的 Key';
+    $('#modelFootNote').textContent = modelData.has_key ? '已配置 Key' : '未配置 Key';
+
+    var dot = $('#modelDot');
+    dot.dataset.state = modelData.mode === 'online' ? 'online' : 'offline';
+    dot.title = modelData.mode === 'online' ? '在线模型已就绪' : '当前为离线模式';
+
+    modelApplyPreset(picked);
+    if (modelData.mode === 'online') {
+      modelSetStatus('ok', '在线模型已就绪', (modelData.model || '') + ' · ' + (modelData.base_url || ''));
+    } else {
+      $('#modelStatus').hidden = true;
+    }
+  }
+
+  function modelLoad() {
+    return api('/api/model').then(modelFill);
+  }
+
+  function openModel() {
+    // 先确认服务端有这个接口。老进程会返回 404「未知接口」，那句话对用户
+    // 毫无帮助；这里提前拦住，换成「该按哪个按钮」。
+    var ready = state.features ? Promise.resolve() : loadStatus();
+    ready.then(function () {
+      if ((state.features || []).indexOf('model_config') < 0) {
+        toast('服务端还是旧版本，没有模型配置接口。请双击「停止服务.bat」，再双击「一键启动.bat」，然后刷新本页', {
+          kind: 'err',
+          seconds: 16
+        });
+        return;
+      }
+      $('#modelStatus').hidden = true;
+      modelLoad().then(function () {
+        modelRoot.hidden = false;
+        $('.scrim', modelRoot).classList.add('is-on');
+        setTimeout(function () { $('#modelProvider').focus(); }, 60);
+      }).catch(function (e) {
+        toast('读取配置失败：' + e.message, { kind: 'err' });
+      });
+    });
+  }
+
+  function closeModel() {
+    $('.scrim', modelRoot).classList.remove('is-on');
+    modelRoot.hidden = true;
+  }
+
+  function initModelPanel() {
+    $('#modelBtn').addEventListener('click', openModel);
+    $('#modelClose').addEventListener('click', closeModel);
+    $('.scrim', modelRoot).addEventListener('click', closeModel);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !modelRoot.hidden) closeModel();
+    });
+
+    $('#modelProvider').addEventListener('change', function (e) {
+      modelApplyPreset(e.target.value);
+      $('#modelStatus').hidden = true;
+    });
+
+    $('#modelTest').addEventListener('click', function () {
+      var btn = this;
+      btn.disabled = true;
+      modelSetStatus('busy', '正在测试…', '会真实调用一次模型，通常几秒内返回。');
+      api('/api/model/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: $('#modelKey').value.trim(),
+          base_url: $('#modelBase').value.trim(),
+          model: $('#modelName').value.trim()
+        })
+      }).then(function (r) {
+        modelSetStatus(
+          r.ok ? 'ok' : 'err',
+          (r.ok ? '✓ ' : '✕ ') + (r.message || '未知结果'),
+          (r.detail || '') + (r.latency_ms ? '（' + r.latency_ms + ' ms）' : '')
+        );
+      }).catch(function (e) {
+        modelSetStatus('err', '测试失败', e.message);
+      }).then(function () { btn.disabled = false; });
+    });
+
+    $('#modelSave').addEventListener('click', function () {
+      var btn = this;
+      btn.disabled = true;
+      api('/api/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: modelServerProvider($('#modelProvider').value),
+          api_key: $('#modelKey').value.trim(),
+          base_url: $('#modelBase').value.trim(),
+          model: $('#modelName').value.trim()
+        })
+      }).then(function (data) {
+        modelFill(data);
+        toast(data.mode === 'online' ? '已保存，在线模型可用' : '已保存：当前为离线模式');
+        modelSetStatus(
+          'ok', '已保存',
+          data.mode === 'online'
+            ? '配置立即生效，下次生成报告就会自动调用模型。'
+            : '下次生成报告会写入待处理文件，等你复制给 AI。'
+        );
+      }).catch(function (e) {
+        modelSetStatus('err', '保存失败', e.message);
+        toast('保存失败：' + e.message, { kind: 'err' });
+      }).then(function () { btn.disabled = false; });
+    });
+
+    // 启动时静默拉一次，点亮导航上的状态点（失败不打扰用户）
+    modelLoad().catch(function () {});
+  }
+
   /* ----------------------------------------------------------- 数据加载 */
   function loadGroups() {
     return api('/api/groups').then(function (data) {
@@ -949,6 +1449,26 @@
       state.templates = data.templates || [];
       renderTemplateList();
       $('#footPath').textContent = '输出目录 ' + (data.version ? 'runs/' : '');
+      // 能力自检：前端已更新、服务端却还是旧进程（改了 Python 没重启）时，
+      // 新接口会返回 404「未知接口」。与其让用户对着含糊报错猜，
+      // 不如直接告诉他该做什么。这是「修完还报错」最常见的原因。
+      // 只提示一次——status 每 20 秒轮询一次，否则会反复弹。
+      state.features = data.features || [];
+      if (!state.featuresWarned) {
+        if (state.features.indexOf('contacts') < 0) {
+          state.featuresWarned = true;
+          toast('服务端仍是旧版本（缺少联系人接口）。请先停止服务，再双击「一键启动.bat」重启后再试', {
+            kind: 'err',
+            seconds: 15
+          });
+        } else if (state.features.indexOf('model_config') < 0) {
+          state.featuresWarned = true;
+          toast('服务端是旧版本（没有模型配置接口）。双击「一键启动.bat」重启后即可使用', {
+            kind: 'err',
+            seconds: 15
+          });
+        }
+      }
     }).catch(function () {
       var el = $('#status');
       el.setAttribute('data-state', 'offline');
@@ -976,8 +1496,25 @@
     initWipe();
     initModal();
     initLeaders();
+    initContactsTabs();
+    initContactModal();
+    initModelPanel();
 
-    $('#groupSearch').addEventListener('input', function (e) { renderGroupList(e.target.value); });
+    // 搜索：群聊在本地过滤；好友/公众号先本地即时过滤，再 debounce 让服务端
+    // 按关键词做全量查询（本地只缓存了前 200 条，纯前端过滤查不到更靠后的）。
+    var contactsSearchTimer = null;
+    $('#groupSearch').addEventListener('input', function (e) {
+      var kw = e.target.value;
+      if (state.contactsTab === 'group') {
+        renderGroupList(kw);
+        return;
+      }
+      renderContactList(kw);
+      clearTimeout(contactsSearchTimer);
+      contactsSearchTimer = setTimeout(function () {
+        loadContacts(state.contactsTab, kw);
+      }, 300);
+    });
     $('#leadersOnly').addEventListener('change', function (e) {
       toast(e.target.checked ? '已开启：只让领导发言进入总结' : '已关闭：全部发言进入总结');
     });

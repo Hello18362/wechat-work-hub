@@ -66,7 +66,7 @@ class VisionProvider(ABC):
         if message.msg_type != TYPE_IMAGE:
             return False
 
-        fallback = message.raw_content or "图片"
+        fallback = (message.raw_content or "").strip() or "图片"
         image_path: Optional[str] = None
         try:
             image_path = fetcher(message)
@@ -74,8 +74,11 @@ class VisionProvider(ABC):
             logger.warning("获取图片文件失败（msg=%s）：%s", message.msg_id, exc)
 
         if not image_path or not Path(image_path).exists():
-            message.content = f"[图片：{fallback}]"
-            message.note = "无可用图片文件"
+            # 保留采集层已提取的元信息（例如 "[图片 215×480]"），
+            # 不要覆盖成干巴巴的 "[图片]"——否则尺寸信息就丢了。
+            if not (message.content or "").strip():
+                message.content = "[图片]"
+            message.note = "无可用图片文件（微信本地为加密 .dat，无法还原）"
             return False
 
         try:
@@ -89,7 +92,8 @@ class VisionProvider(ABC):
             message.note = f"已理解（{self.name}）"
             return True
 
-        message.content = f"[图片：{fallback}]"
+        if not (message.content or "").strip():
+            message.content = "[图片]"
         message.note = "图片理解失败或 provider 不可用"
         return False
 

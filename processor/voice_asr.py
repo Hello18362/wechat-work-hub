@@ -155,8 +155,10 @@ class VoiceTranscriber:
             logger.warning("获取语音文件失败（msg=%s）：%s", message.msg_id, exc)
 
         if not audio_path:
-            message.content = PLACEHOLDER_VOICE
-            message.note = "未取到本地语音文件"
+            # 保留采集层已提取的时长信息（如 "[语音 5″]"），不要覆盖成 "[语音]"
+            if not (message.content or "").strip():
+                message.content = PLACEHOLDER_VOICE
+            message.note = "未取到本地语音文件（微信不缓存音频）"
             return False
 
         text = self.transcribe(audio_path)
@@ -166,7 +168,8 @@ class VoiceTranscriber:
             message.note = "已转写"
             return True
 
-        message.content = PLACEHOLDER_VOICE
+        if not (message.content or "").strip():
+            message.content = PLACEHOLDER_VOICE
         message.note = "语音转写失败或未安装 faster-whisper"
         return False
 

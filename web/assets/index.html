@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WeChat Work Hub · 控制台</title>
-<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/style.css?v={{ASSET_V}}">
 </head>
 <body>
 
@@ -19,6 +19,10 @@
     <span class="status-dot"></span>
     <span class="status-text">正在检测服务…</span>
   </div>
+  <button class="nav-model press" id="modelBtn" title="模型设置" aria-label="模型设置">
+    <span class="nav-model-dot" id="modelDot" data-state="offline"></span>
+    <span class="nav-model-text">模型</span>
+  </button>
   <label class="switch">
     <input class="switch-input" type="checkbox" id="themeSwitch">
     <span class="switch-track"><span class="switch-thumb"></span></span>
@@ -57,6 +61,11 @@
           <span class="caret">▾</span>
         </button>
         <div class="pop" id="groupPop" hidden>
+          <div class="pop-tabs">
+            <button class="pop-tab is-on" data-tab="group" type="button">群聊</button>
+            <button class="pop-tab" data-tab="friend" type="button">好友</button>
+            <button class="pop-tab" data-tab="official" type="button">公众号</button>
+          </div>
           <input class="pop-search" id="groupSearch" placeholder="搜索群名…">
           <ul class="pop-list" id="groupList"></ul>
         </div>
@@ -88,7 +97,7 @@
       <div class="field">
         <span class="field-label">总结模板</span>
         <button class="control" id="tplBtn" aria-expanded="false">
-          <span id="tplLabel">leader_brief</span>
+          <span id="tplLabel">领导简报</span>
           <span class="caret">▾</span>
         </button>
         <div class="pop" id="tplPop" hidden><ul class="pop-list" id="tplList"></ul></div>
@@ -175,6 +184,35 @@
   </article>
 </div>
 
+<!-- 联系人详情 -->
+<div class="modal-root" id="contactRoot" hidden>
+  <div class="scrim"></div>
+  <article class="modal-card contact-card" role="dialog" aria-modal="true" aria-labelledby="contactName">
+    <div class="modal-head">
+      <span class="modal-title">联系人</span>
+      <button class="modal-x" id="contactClose" aria-label="关闭">✕</button>
+    </div>
+    <div class="contact-head">
+      <div class="contact-avatar" id="contactAvatar">?</div>
+      <div class="contact-ident">
+        <div class="contact-name" id="contactName"></div>
+        <div class="contact-desc" id="contactSub"></div>
+      </div>
+      <span class="contact-type" id="contactType">好友</span>
+    </div>
+    <dl class="contact-fields">
+      <div><dt>备注</dt><dd id="contactRemark">—</dd></div>
+      <div><dt>微信昵称</dt><dd id="contactNick">—</dd></div>
+      <div><dt>微信号</dt><dd id="contactWxid">—</dd></div>
+    </dl>
+    <div class="modal-tools">
+      <button class="chip-btn" id="contactCopy">复制微信号</button>
+      <button class="chip-btn" id="contactCopyName">复制名称</button>
+    </div>
+    <p class="contact-hint">「总结该联系人的聊天记录」尚未实现，后续版本提供。</p>
+  </article>
+</div>
+
 <!-- 卡片弹出详情（01-8） -->
 <div class="modal-root" id="modalRoot" hidden>
   <div class="scrim"></div>
@@ -191,9 +229,61 @@
   </article>
 </div>
 
+<!-- 模型设置 -->
+<div class="modal-root" id="modelRoot" hidden>
+  <div class="scrim"></div>
+  <article class="modal-card model-card" role="dialog" aria-modal="true" aria-labelledby="modelTitle">
+    <div class="modal-head">
+      <span class="modal-title" id="modelTitle">模型设置</span>
+      <button class="modal-x" id="modelClose" aria-label="关闭">✕</button>
+    </div>
+
+    <p class="model-lead">
+      不配也能用。报告会照常生成，只是「总结」那一段变成一份待处理文件，
+      你复制到任意 AI 对话框里就能拿到同样的结果。
+    </p>
+
+    <div class="model-field">
+      <label class="model-label" for="modelProvider">服务商</label>
+      <select class="model-input" id="modelProvider"></select>
+      <div class="model-hint" id="modelProviderHint"></div>
+    </div>
+
+    <div class="model-field">
+      <label class="model-label" for="modelKey">API Key</label>
+      <input class="model-input" id="modelKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴你自己的 Key">
+      <div class="model-hint" id="modelKeyHint">只存在本机 .env 文件里，不会上传，也不会发给作者。</div>
+    </div>
+
+    <div class="model-row">
+      <div class="model-field">
+        <label class="model-label" for="modelBase">Base URL</label>
+        <input class="model-input" id="modelBase" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="model-field">
+        <label class="model-label" for="modelName">模型名</label>
+        <input class="model-input" id="modelName" spellcheck="false" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="model-status" id="modelStatus" data-state="idle" hidden>
+      <span class="model-status-title" id="modelStatusTitle"></span>
+      <span class="model-status-detail" id="modelStatusDetail"></span>
+    </div>
+
+    <div class="model-foot">
+      <span class="model-foot-note" id="modelFootNote"></span>
+      <div class="model-foot-btns">
+        <button class="btn-ghost press" id="modelTest">测试连接</button>
+        <button class="btn-primary press" id="modelSave">保存</button>
+      </div>
+    </div>
+  </article>
+</div>
+
 <div class="toast-host" id="toastHost"></div>
 <button class="to-top" id="toTop" aria-label="回到顶部">↑</button>
 
-<script src="/assets/app.js"></script>
+<script src="/assets/app.js?v={{ASSET_V}}"></script>
 </body>
 </html>

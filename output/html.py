@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from string import Template
@@ -804,22 +805,49 @@ def _e(text: Any) -> str:
     return html.escape(str(text if text is not None else ""), quote=False)
 
 
-def _sections() -> List[Dict[str, str]]:
-    """返回目录项定义。"""
-    return [
+def _sections(share: bool = False) -> List[Dict[str, str]]:
+    """返回目录项定义。
+
+    `share=True` 时去掉「聊天记录」——对外分享只给摘要，不给逐条原文。
+    """
+    items = [
         {"id": "sec-overview", "label": "概览"},
         {"id": "sec-tasks", "label": "任务"},
         {"id": "sec-summary", "label": "总结"},
-        {"id": "sec-chat", "label": "聊天记录"},
     ]
+    if not share:
+        items.append({"id": "sec-chat", "label": "聊天记录"})
+    return items
 
 
-def _build_toc() -> str:
+# 对外分享时的脱敏规则：(正则, 替换)。顺序很关键——先身份证（18 位），
+# 再手机号；否则身份证的前 11 位会被手机号规则先吃掉一半。
+_MASK_RULES = [
+    (re.compile(r"(?<!\d)(\d{6})\d{8}(\d{3}[\dXx])(?!\d)"), r"\1********\2"),      # 身份证
+    (re.compile(r"(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)"), r"\1****\2"),             # 手机号
+    (
+        re.compile(r"(?<![\w.])([A-Za-z0-9._%+-]{2})[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})"),
+        r"\1***\2",
+    ),                                                                              # 邮箱
+]
+
+
+def _mask_sensitive(text: str) -> str:
+    """把手机号 / 身份证 / 邮箱打码，供对外分享的报告使用。"""
+    if not text:
+        return text
+    out = str(text)
+    for pattern, repl in _MASK_RULES:
+        out = pattern.sub(repl, out)
+    return out
+
+
+def _build_toc(share: bool = False) -> str:
     """构造目录列表 HTML。"""
     bar = '<li class="toc-bar" aria-hidden="true"></li>'
     items = "\n".join(
         f'<li class="toc-item"><a class="toc-link" href="#{s["id"]}">{_e(s["label"])}</a></li>'
-        for s in _sections()
+        for s in _sections(share)
     )
     return bar + "\n" + items
 
@@ -966,8 +994,13 @@ def _build_content(
     summary_markdown: str,
     messages: Iterable[Message],
     stats: Dict[str, Any],
+    share: bool = False,
 ) -> tuple:
     """构造右侧内容区。
+
+    Args:
+        share: 为 True 时**不渲染聊天记录**，只输出概览/任务/总结，
+            供对外分享使用（不把群里其他人的原话发出去）。
 
     Returns:
         `(content_html, payload_list)`
@@ -982,10 +1015,9 @@ def _build_content(
   <button class="filter-btn" role="tab" data-mode="leader" aria-selected="false">只看领导</button>
 </div>"""
 
-    rows_html, payload = _build_message_rows(messages)
     task_cards = _build_task_cards(summary_markdown)
 
-    content = f"""<section class="section" id="sec-tasks">
+    head = f"""<section class="section" id="sec-tasks">
   <div class="section-head">
     <h2 class="section-title">任务安排</h2>
     <p class="section-note">共 {task_count} 项 · 按优先级从左到右、从上到下</p>
@@ -999,7 +1031,13 @@ def _build_content(
     <p class="section-note">从 {total} 条消息中提炼</p>
   </div>
   <div class="panel">{summary_html}</div>
-</section>
+</section>"""
+
+    if share:
+        return head, []
+
+    rows_html, payload = _build_message_rows(messages)
+    content = head + f"""
 
 <section class="section" id="sec-chat">
   <div class="section-head">
@@ -1025,6 +1063,7 @@ def render_report(
     stats: Optional[Dict[str, Any]] = None,
     theme: str = "light",
     title: Optional[str] = None,
+    share: bool = False,
 ) -> str:
     """渲染完整 HTML 报告。
 
@@ -1036,13 +1075,20 @@ def render_report(
         stats: core.stats.summarize_messages 的输出。
         theme: `light` 或 `dark`。
         title: 页面标题，默认自动生成。
+        share: 为 True 时生成**对外分享版**：不含聊天记录原文，
+            并对手机号 / 身份证 / 邮箱打码。
 
     Returns:
         完整 HTML 字符串（单文件，无外部依赖）。
     """
     stats = dict(stats or {})
-    messages = list(messages)
     summary_markdown = summary_markdown or ""
+    if share:
+        # 对外分享：清空消息列表（不输出原文），并对摘要与群名做脱敏
+        summary_markdown = _mask_sensitive(summary_markdown)
+        group_name = _mask_sensitive(group_name)
+        messages = []
+    messages = list(messages)
 
     # 任务数：直接统计总结里 ☐ / ☑ 行，供 Hero 展示
     stats["_tasks"] = len(extract_tasks(summary_markdown))
@@ -1051,7 +1097,18 @@ def render_report(
     # 任务行也跳过：它们已单独渲染成上方的「任务卡片网格」，避免重复展示。
     summary_html = md_to_html(strip_summary_heading(summary_markdown), skip_tasks=True)
     hero = _build_hero(stats, group_name, date)
-    content, payload = _build_content(summary_html, summary_markdown, messages, stats)
+    content, payload = _build_content(
+        summary_html, summary_markdown, messages, stats, share=share
+    )
+    if share:
+        content = (
+            '<div class="share-note" style="margin:0 0 20px;padding:12px 16px;'
+            "border:1px solid var(--line);border-radius:12px;background:var(--surface-2);"
+            'font-size:12.5px;color:var(--ink-2);line-height:1.6">'
+            "这是自动生成的<b>摘要版</b>：只包含 AI 提炼的结论与待办，"
+            "不含群内逐条聊天原文；正文中的手机号、身份证、邮箱已打码。"
+            "</div>"
+        ) + content
 
     safe_payload = json.dumps(
         {"messages": payload, "summary_md": summary_markdown}, ensure_ascii=False
@@ -1060,7 +1117,13 @@ def render_report(
     leader_hint = (
         f"领导发言 {stats.get('leader_count', 0)} / 消息总数 {stats.get('total', 0)}"
     )
-    footer = f"""<footer class="foot">
+    if share:
+        footer = f"""<footer class="foot">
+  <span>WeChat Work Hub · 分享版 · {datetime.now():%Y-%m-%d %H:%M}</span>
+  <span>仅含 AI 摘要，不含原始聊天记录</span>
+</footer>"""
+    else:
+        footer = f"""<footer class="foot">
   <span>WeChat Work Hub · 本地生成 · {datetime.now():%Y-%m-%d %H:%M}</span>
   <span>{leader_hint}</span>
   <span style="flex:1"></span>
@@ -1071,10 +1134,10 @@ def render_report(
         THEME="dark" if theme == "dark" else "light",
         TITLE=_e(title or f"{group_name} · {date} 工作简报"),
         GROUP=_e(group_name),
-        SUB=_e(leader_hint),
+        SUB=_e("摘要分享版" if share else leader_hint),
         DATE=_e(date),
         HERO=hero,
-        TOC_ITEMS=_build_toc(),
+        TOC_ITEMS=_build_toc(share),
         CONTENT=content,
         FOOTER=footer,
         PAYLOAD=safe_payload,
@@ -1092,6 +1155,7 @@ def write_html(
     stats: Optional[Dict[str, Any]] = None,
     theme: str = "light",
     suffix: str = "",
+    share: bool = False,
 ) -> Path:
     """写入 HTML 报告并返回路径。
 
@@ -1104,6 +1168,7 @@ def write_html(
         stats: 统计信息。
         theme: 主题。
         suffix: 文件名后缀。
+        share: 为 True 时写**对外分享版**（无聊天原文 + 敏感信息打码）。
 
     Returns:
         写入成功的 Path。
@@ -1115,7 +1180,9 @@ def write_html(
     filename = f"{date}_{safe_filename(group_name)}{('_' + stamp) if stamp else ''}.html"
     target = directory / filename
     target.write_text(
-        render_report(summary_markdown, messages, group_name, date, stats, theme),
+        render_report(
+            summary_markdown, messages, group_name, date, stats, theme, share=share
+        ),
         encoding="utf-8",
     )
     logger.info("HTML 报告已写入：%s", target)
