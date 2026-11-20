@@ -46,6 +46,9 @@ from summarizer.doubao_api import test_connection
 
 logger = get_logger("web")
 
+APP_VERSION = "0.1.0"
+_STARTED_AT = time.time()  # 服务进程启动时刻，/health 用它报 uptime
+
 ASSETS_DIR = PROJECT_ROOT / "web" / "assets"
 MAX_TASKS = 30
 MAX_LOGS = 200
@@ -449,6 +452,8 @@ class HubHandler(BaseHTTPRequestHandler):
 
         routes: Dict[str, Callable[[Dict[str, List[str]]], None]] = {
             "/": self._page,
+            "/health": self._api_health,
+            "/healthz": self._api_health,
             "/api/status": self._api_status,
             "/api/groups": self._api_groups,
             "/api/groups/config": self._api_groups_config,
@@ -557,6 +562,19 @@ class HubHandler(BaseHTTPRequestHandler):
         self._send(target.read_bytes(), 200, mime)
 
     # ---------- API ---------- #
+    def _api_health(self, query: Dict[str, List[str]]) -> None:
+        """轻量健康检查：不碰数据源、不扫目录，给探针/脚本用。
+
+        约定：进程能响应 200 即视为「活着」；数据源是否在线看 /api/status。
+        """
+        self._json(
+            {
+                "status": "ok",
+                "version": APP_VERSION,
+                "uptime_seconds": int(time.time() - _STARTED_AT),
+            }
+        )
+
     def _api_status(self, query: Dict[str, List[str]]) -> None:
         """返回服务与 chatlog 的健康状态。
 
@@ -573,9 +591,11 @@ class HubHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "chatlog_online": online,
                 "api_base": self.cfg.get("chatlog", {}).get("api_base"),
+                # 数据源模式：sqlite/chatlog/sample，前端据此显示不同的状态文案
+                "source_mode": getattr(client, "source_mode", "chatlog"),
                 "today": datetime.now().strftime("%Y-%m-%d"),
                 "templates": list_prompt_templates(),
-                "version": "0.1.0",
+                "version": APP_VERSION,
                 # 服务端已实现的功能；前端据此判断是否需要提示重启
                 "features": [
                     "contacts",
@@ -597,6 +617,7 @@ class HubHandler(BaseHTTPRequestHandler):
         merged: List[Dict[str, Any]] = []
 
         if client.health():
+            source = getattr(client, "source_mode", "chatlog")
             for group in client.get_groups():
                 name = group.get("name", "")
                 merged.append(
@@ -605,7 +626,7 @@ class HubHandler(BaseHTTPRequestHandler):
                         "configured": name in configured,
                         "leader_count": configured.get(name, 0),
                         "pinned": name in pinned,
-                        "source": "chatlog",
+                        "source": source,
                     }
                 )
         # chatlog 不可用时，退化为展示配置里的群，保证页面仍能操作
