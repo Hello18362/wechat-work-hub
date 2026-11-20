@@ -52,6 +52,12 @@ def _dbg(*parts) -> None:
         pass
 
 
+def hover_pad_hit(rect, cx: float, cy: float, pad: float) -> bool:
+    """光标是否落在矩形外扩 pad 的范围内（细条悬停判定，抽出来方便测试）。"""
+    x, y, w, h = rect
+    return (x - pad <= cx <= x + w + pad) and (y - pad <= cy <= y + h + pad)
+
+
 def _xy(lparam: int) -> Tuple[int, int]:
     x = lparam & 0xFFFF
     y = (lparam >> 16) & 0xFFFF
@@ -426,9 +432,12 @@ class Widget:
         if not self.side:
             if not auto:
                 return
-            # 自动收缩时用户可能没把面板贴边：按用户习惯贴到右侧
-            self.side = "right"
-            self.state.set(side="right")
+            # 自动收缩时选离面板更近的那条边，不要生硬地一律贴右侧
+            left, top, right, bottom = self._work()
+            pw, _ph = self._panel_size()
+            self.side = ("left" if self.panel_pos[0] + pw / 2 < (left + right) / 2
+                         else "right")
+            self.state.set(side=self.side)
             self.state.save()
         self._animate("sliver", dur_ms=int(T.ANIM_MS * 0.85))
         self.state.set(mode="sliver")
@@ -445,6 +454,9 @@ class Widget:
 
     def _on_down(self, cx: int, cy: int) -> None:
         k = self.k
+        if self.anim:
+            # 形变动画进行中的命中区还是上一形态的，容易误触，这一下点击直接丢掉
+            return
         hit = self._hit_at(cx / k, cy / k)
         sx, sy = win32.cursor_pos()
         self._press = {"sx": sx, "sy": sy,
@@ -478,6 +490,10 @@ class Widget:
 
         k = self.k
         hit = self._hit_at(cx / k, cy / k)
+        # 细条上不等到 100ms 轮询：鼠标一碰到就立刻展开
+        if self.mode == "sliver" and hit and hit.get("kind") == "sliver":
+            self.to_expanded()
+            return
         idx = hit["index"] if hit and hit["kind"] == "card" else -1
         key = hit["kind"] if hit and hit["kind"] in ("collapse", "ball",
                                                      "check", "archive") else ""
@@ -504,6 +520,11 @@ class Widget:
 
         hit = self._hit_at(cx / self.k, cy / self.k)
         _dbg("up", hit["kind"] if hit else None)
+        # 在细条上按下就松开：直接展开。此时面板已经弹开，
+        # 不能再用「松开瞬间的命中区」派发，否则会误触刚展开的卡片。
+        if (p.get("hit") or {}).get("kind") == "sliver":
+            self.to_expanded()
+            return
         if not hit:
             return
         kind = hit["kind"]
@@ -747,7 +768,7 @@ class Widget:
 
         if self.mode == "sliver":
             pad = T.SLIVER_HOVER_PAD * self.k
-            if x - pad <= cx <= x + w + pad and y - pad <= cy <= y + h + pad:
+            if hover_pad_hit(self.win_rect, cx, cy, pad):
                 self.to_expanded()
             return
 

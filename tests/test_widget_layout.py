@@ -112,5 +112,26 @@ class BallSliverSmokeTest(unittest.TestCase):
                 self.assertGreaterEqual(len(hits), 1)
 
 
+class SliverHoverTest(unittest.TestCase):
+    """细条悬停判定：用户报告「收成细条后点不动」，这里锁住判定边界。"""
+
+    RECT = (1900, 400, 68, 384)   # 贴在 1920 宽的屏幕右侧
+
+    def _hit(self, cx, cy, pad=24):
+        from tools.widget.app import hover_pad_hit
+        return hover_pad_hit(self.RECT, cx, cy, pad)
+
+    def test_inside_bar(self):
+        self.assertTrue(self._hit(1934, 600))
+
+    def test_within_pad_left(self):
+        self.assertTrue(self._hit(1900 - 20, 600))   # 24px 缓冲内
+        self.assertTrue(self._hit(1876, 600))        # 正好边界
+
+    def test_outside_pad(self):
+        self.assertFalse(self._hit(1800, 600))       # 离太远，不该弹
+        self.assertFalse(self._hit(1934, 100))       # 纵向不沾边
+
+
 if __name__ == "__main__":
     unittest.main()
