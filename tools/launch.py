@@ -22,6 +22,41 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PORT = 5710
 
+# (import 名, pip 包名)。干净机器上缺第一个服务就起不来，且错误只埋在
+# logs/console.out 里 —— 所以在拉起进程之前先检查并一键补装。
+CORE_DEPS = (
+    ("requests", "requests"),
+    ("yaml", "PyYAML"),
+    ("bs4", "beautifulsoup4"),
+    ("PIL", "Pillow"),
+)
+
+
+def _missing_deps(deps=None) -> list:
+    """探测缺失的核心依赖，返回缺失的 pip 包名列表（空列表 = 齐全）。
+
+    参数可注入假包名，便于测试。
+    """
+    import importlib
+
+    missing = []
+    for module, package in deps if deps is not None else CORE_DEPS:
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            missing.append(package)
+    return missing
+
+
+def _install_deps() -> bool:
+    """`pip install -e ROOT` 一把装齐，成功返回 True。"""
+    print("正在自动安装依赖（首次可能要几分钟）…")
+    rc = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-e", str(ROOT)],
+        cwd=str(ROOT),
+    ).returncode
+    return rc == 0
+
 
 def _read_port() -> int:
     """从 settings.yaml 读端口；读不到就用 5710（配置坏了也不该启动不了）。"""
@@ -39,6 +74,33 @@ def _port_open(port: int) -> bool:
     with socket.socket() as sock:
         sock.settimeout(0.6)
         return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _service_http_ok(url: str, timeout: float = 1.0) -> bool:
+    """HTTP 层探测 /health，与 connect_ex 构成双保险。
+
+    个别环境（沙箱、安全软件）下裸端口探测会失灵，但服务其实已就绪；
+    此时 HTTP 请求仍能通，就用它兜底，避免误报「启动超时」。
+    """
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(url + "/health", timeout=timeout) as resp:
+            return resp.status == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _log_tail(lines: int = 12) -> str:
+    """取 console.out 末尾几行，启动失败时直接展示原因，别让用户翻文件。"""
+    path = ROOT / "logs" / "console.out"
+    if not path.exists():
+        return f"（没有日志文件：{path}）"
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return f"（日志读取失败：{path}）"
+    return "\n".join(content[-lines:])
 
 
 def _pids_listening(port: int) -> list[str]:
@@ -89,7 +151,31 @@ def main() -> int:
         print("请确认这个脚本位于项目根目录的 tools/ 目录下，且没有被单独拷贝到别处。")
         return 1
 
-    # 1) 清理旧进程（只杀 Python，别人的程序不动）
+    # 1) 依赖检查：缺 requests/yaml/bs4/Pillow 时后台服务会静默起不来，
+    #    这里在拉进程之前拦住并给出补装选项，而不是让用户去翻 logs/console.out。
+    missing = _missing_deps()
+    if missing:
+        print("缺少依赖：" + "、".join(missing))
+        print(f"也可以手动安装：{sys.executable} -m pip install -e \"{ROOT}\"")
+        if "--no-install" in sys.argv:
+            print("检测到 --no-install，跳过自动安装。请先手动装好依赖再启动。")
+            return 1
+        answer = ""
+        try:
+            answer = input("是否现在自动安装？[Y/n] ").strip().lower()
+        except EOFError:
+            answer = "y"  # 没有交互终端（脚本/CI）时默认安装
+        if answer not in ("", "y", "yes"):
+            print("已取消。装好依赖后重新运行即可；也可以跑 python tools/doctor.py 看整体体检。")
+            return 1
+        if not _install_deps() or _missing_deps():
+            print("依赖安装失败。请手动执行后重试：")
+            print(f"  {sys.executable} -m pip install -e \"{ROOT}\"")
+            print("也可以先跑 python tools/doctor.py 查看完整体检。")
+            return 1
+        print("依赖就绪。")
+
+    # 2) 清理旧进程（只杀 Python，别人的程序不动）
     for pid in _pids_listening(port):
         if not _is_python_process(pid):
             print(f"端口 {port} 被其他程序占用（PID {pid}），请先关闭它再试。")
@@ -114,7 +200,7 @@ def main() -> int:
     print(f"使用的解释器：{launcher}")
     print("正在启动后台服务…")
 
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [str(launcher), str(entry)],
         cwd=str(ROOT),
         creationflags=0x00000008 | 0x00000200,  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
@@ -124,21 +210,36 @@ def main() -> int:
         stderr=subprocess.DEVNULL,
     )
 
-    # 3) 等端口就绪（最多 20 秒）
+    # 3) 等端口就绪。全新安装后的第一次启动要给足时间：依赖刚装完，
+    #    系统可能同时在扫描新 DLL，import 会比平时慢，最多等 60 秒。
+    #    探测用双保险：connect_ex 失败时再走一次 HTTP /health（两种代码路径，
+    #    避免个别环境下端口探测失灵导致误报「启动超时」）。
     url = f"http://127.0.0.1:{port}"
-    for _ in range(40):
-        if _port_open(port):
+    first_start_after_install = bool(missing)
+    waited = 0
+    for _ in range(120):
+        if _port_open(port) or _service_http_ok(url):
             print(f"启动成功：{url}")
-            if "--no-browser" not in sys.argv:
-                try:
-                    webbrowser.open(url)
-                except Exception:  # noqa: BLE001
-                    pass
+            if "--no-browser" in sys.argv:
+                return 0
+            try:
+                webbrowser.open(url)
+            except Exception:  # noqa: BLE001
+                pass
             return 0
+        if proc.poll() is not None:
+            print("后台服务启动后立刻退出了。最后几行日志：")
+            print(_log_tail())
+            return 1
         time.sleep(0.5)
+        waited += 1
+        if waited % 20 == 0:
+            print(f"服务启动中…已等待 {waited // 2} 秒"
+                  + ("（首次启动较慢，请耐心）" if first_start_after_install else ""))
 
-    print("启动超时。请查看 logs/console.out 里的报错。")
-    print(f"日志路径：{ROOT / 'logs' / 'console.out'}")
+    print("启动超时。最后几行日志：")
+    print(_log_tail())
+    print(f"完整日志：{ROOT / 'logs' / 'console.out'}")
     return 1
 
 
