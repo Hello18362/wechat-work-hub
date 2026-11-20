@@ -351,21 +351,34 @@ def _arrow_right(cv: Canvas, cx: float, cy: float, size: float, color, width: fl
 
 # ------------------------------------------------------------------ 布局
 
+# 归档行的哨兵卡片：只用于布局和命中，不参与排序
+ARCHIVE = {"__archive__": True, "group": "", "title": "", "priority": "",
+           "source": "", "owner": "", "due": "", "done": False}
+
+
 def layout_cards(cards: List[Dict], done_expanded: bool):
     """返回 (rows, content_h)。
 
     rows: [(card, (x0, y0, x1, y1))]，y 相对**卡片区顶部**，不含滚动偏移。
+        未完成任务在前；有已完成任务时，末尾跟一条「归档」行
+        （折叠态一条 ARCH_H 高的行；展开态 = 头部 + 每条已完成的 DONE_ROW_H 行）。
     content_h: 所有卡片占用的总高度，比可视区大就需要滚动。
     """
     region_h = T.CARDS_BOTTOM - T.CARDS_TOP
     undone = [c for c in cards if not c.get("done")][: T.MAX_CARDS]
+    done = [c for c in cards if c.get("done")]
 
     gap = T.CARD_GAP
     n = max(1, len(undone))
+    # 有已完成时给归档行预留位置：未完成卡不算归档行就不超屏，
+    # 折叠态的归档行正好贴住可视区底边，不需要滚动就能看到。
+    usable_h = region_h
+    if done:
+        usable_h -= (T.ARCH_HEAD_H if done_expanded else T.ARCH_H) + gap
 
     if n <= 6:
         # 6 张以内铺满可视区（就是原来那版的高度关系）
-        h = (region_h - gap * (n - 1)) / n
+        h = (usable_h - gap * (n - 1)) / n
         h = max(T.CARD_MIN_H, min(h, 120.0))
     else:
         # 超过 6 张：固定高度，靠滚动看剩下的
@@ -377,6 +390,18 @@ def layout_cards(cards: List[Dict], done_expanded: bool):
     for card in undone:
         rows.append((card, (x0, y, x1, y + h)))
         y += h + gap
+
+    if done:
+        arch_h = T.ARCH_H if not done_expanded else T.ARCH_HEAD_H
+        rows.append((dict(ARCHIVE), (x0, y, x1, y + arch_h)))
+        y += arch_h + gap
+        if done_expanded:
+            for card in done:
+                c = dict(card)
+                c["done"] = True
+                rows.append((c, (x0, y, x1, y + T.DONE_ROW_H)))
+                y += T.DONE_ROW_H + gap
+
     content_h = (y - gap) if rows else 0.0
     return rows, content_h
 
@@ -417,27 +442,7 @@ def draw_panel(state: Dict, k: float, backdrop: Optional[Image.Image],
     _chevron_down(cv, (bx0 + bx1) / 2, (by0 + by1) / 2 + 1, 9, T.INK_2, 1.5)
     hits.append({"kind": "collapse", "rect": (bx0, by0, bx1, by1)})
 
-    # ---- 头部右侧：已完成任务的迷你卡（Mac 坞那种缩略图），点一下恢复
-    thumbs = (done_list or [])[: T.THUMB_MAX]
-    if thumbs:
-        tw, th, gap = T.THUMB_W, T.THUMB_H, T.THUMB_GAP
-        strip_right = bx0 - 10
-        ty0 = margin + 67 - th / 2
-        ty1 = ty0 + th
-        start = strip_right - len(thumbs) * tw - (len(thumbs) - 1) * gap
-        for i, card in enumerate(thumbs):
-            tx0 = start + i * (tw + gap)
-            hot = hover_key == "thumb" and state.get("thumb_index") == i
-            cv.rounded(tx0, ty0, tx0 + tw, ty1, 6,
-                       fill=(255, 255, 255, 46 if hot else 26),
-                       outline=(255, 255, 255, 90 if hot else 46), width=1.0)
-            # 三根小横线，暗示"刚才那张卡"
-            for j, wfrac in enumerate((0.62, 0.44, 0.3)):
-                ly = ty0 + 7 + j * 4
-                cv.rounded(tx0 + 6, ly, tx0 + 6 + (tw - 12) * wfrac, ly + 1.4, 0.7,
-                           fill=(255, 255, 255, 110 if hot else 74))
-            hits.append({"kind": "thumb", "index": i, "card": card,
-                         "rect": (tx0 - 1, ty0 - 1, tx0 + tw + 1, ty1 + 1)})
+    # ---- 头部右侧：只有收起按钮（归档收进列表底部，不再占头部）
 
     # ---- 卡片区（独立图层，天然被区域裁切，才能滚）
     rows, content_h = layout_cards(cards, state.get("done_expanded", False))
@@ -457,10 +462,71 @@ def draw_panel(state: Dict, k: float, backdrop: Optional[Image.Image],
         if y1 < -4 or y0 > region_h + 4:
             continue
 
+        # ---- 归档行（折叠 / 展开态的头）：整条是一个命中区，点击切换
+        if card.get("__archive__"):
+            hot = idx == hover_idx
+            card_cv.rounded(x0, y0, x1, y1, T.CARD_RADIUS,
+                            fill=(255, 255, 255, 30 if hot else 18),
+                            outline=(255, 255, 255, 40 if hot else 28), width=1.0)
+            cy = (y0 + y1) / 2
+            txt = "已完成 %d 项" % len(done_list)
+            if state.get("done_expanded"):
+                txt += " · 点击收起"
+            else:
+                txt += " · 点击展开"
+            tdraw.text(((x0 + 18) * k, cy * k), txt,
+                       font=T.font(12 * k, True), fill=T.INK_2 if not hot else T.INK,
+                       anchor="lm")
+            if state.get("done_expanded"):
+                _chevron_up(card_cv, x1 - 18, cy + 1, 9, T.INK_2, 1.6)
+            else:
+                _chevron_down(card_cv, x1 - 18, cy + 1, 9, T.INK_2, 1.6)
+            hy0 = max(0.0, y0)
+            hy1 = min(region_h, y1)
+            if hy1 > hy0:
+                hits.append({"kind": "archive", "index": idx, "card": dict(card),
+                             "rect": (margin + x0, margin + T.CARDS_TOP + hy0,
+                                      margin + x1, margin + T.CARDS_TOP + hy1)})
+            continue
+
+        # ---- 已完成的归档条目：点击任意处恢复
+        if card.get("done"):
+            hot = idx == hover_idx
+            card_cv.rounded(x0, y0, x1, y1, T.CARD_RADIUS,
+                            fill=(255, 255, 255, 30 if hot else 15),
+                            outline=(255, 255, 255, 38 if hot else 24), width=1.0)
+            ccx = x0 + 16 + T.CHECK_R
+            ccy = (y0 + y1) / 2
+            card_cv.ellipse(ccx - T.CHECK_R + 1, ccy - T.CHECK_R + 1,
+                            ccx + T.CHECK_R - 1, ccy + T.CHECK_R - 1,
+                            fill=(255, 255, 255, 22), outline=(255, 255, 255, 70), width=1.1)
+            _check(card_cv, ccx - 1, ccy, T.CHECK_R * 0.85, T.INK_DONE, 1.5)
+            tx0 = x0 + 16 + T.CHECK_R * 2 + 8
+            f_t = T.font(12.5 * k, True)
+            title = ellipsize(_MEAS, card.get("title") or "（无标题）", f_t,
+                              (x1 - 16) - tx0)
+            tdraw.text((tx0 * k, (y0 + 19) * k), title, font=f_t, fill=T.INK_DONE)
+            meta = " · ".join(v for v in (card.get("group") or "",
+                                          card.get("due") or "") if v)
+            f_m = T.font(10.5 * k)
+            meta_txt = ellipsize(_MEAS, meta, f_m, (x1 - 16) - tx0)
+            tdraw.text((tx0 * k, (y0 + 39) * k), meta_txt, font=f_m, fill=T.INK_3)
+            if hot:
+                tdraw.text(((x1 - 16) * k, ((y0 + y1) / 2 + 1) * k), "恢复",
+                           font=T.font(11 * k, True), fill=T.INK, anchor="rm")
+            hy0 = max(0.0, y0)
+            hy1 = min(region_h, y1)
+            if hy1 > hy0:
+                hits.append({"kind": "card", "index": idx, "card": dict(card),
+                             "rect": (margin + x0, margin + T.CARDS_TOP + hy0,
+                                      margin + x1, margin + T.CARDS_TOP + hy1)})
+            continue
+
+        # ---- 未完成卡片
         ch = y1 - y0
         compact = ch < 70
         pad_top = y0 + (11 if compact else max(11.0, (ch - 62) / 2))
-        done_card = bool(card.get("done"))
+        done_card = False
         hot = idx == hover_idx
         pri = card.get("priority") or "常规"
 
@@ -469,8 +535,9 @@ def draw_panel(state: Dict, k: float, backdrop: Optional[Image.Image],
                         fill=T.CARD_FILL_HOVER if hot else T.CARD_FILL,
                         outline=T.CARD_BORDER_HOVER if hot else T.CARD_BORDER,
                         width=1.0)
-        if pri in ("紧急", "高") and not done_card:
-            card_cv.rounded(x0 + 0.5, y0 + 14, x0 + 3.5, y1 - 14, 2, fill=T.ACCENT_DIM)
+        # 左侧优先级色条（每一级都有，一眼扫出轻重缓急）
+        bar_bg = T.PRIORITY.get(pri, T.PRIORITY["常规"])[0]
+        card_cv.rounded(x0 + 1, y0 + 16, x0 + 4, y1 - 16, 1.5, fill=bar_bg)
 
         chip_h = 19.0
         chip_w = _text_len(_MEAS, pri, T.font(10.5 * k, True)) / k + 16
@@ -505,30 +572,41 @@ def draw_panel(state: Dict, k: float, backdrop: Optional[Image.Image],
         f_g = T.font(10.5 * k)
         room = (x1 - 14 - chip_w - 10) - tx0
         gname = ellipsize(_MEAS, card.get("group") or "未知群", f_g, room)
-        tdraw.text((tx0 * k, pad_top * k), gname, font=f_g,
-                   fill=T.INK_3 if not done_card else T.INK_DONE)
+        tdraw.text((tx0 * k, pad_top * k), gname, font=f_g, fill=T.INK_3)
 
         _bg, fg = T.PRIORITY.get(pri, T.PRIORITY["常规"])
         tdraw.text(((cx0 + chip_w / 2) * k, (chip_y + chip_h / 2 + 0.5) * k), pri,
                    font=T.font(10.5 * k, True), fill=fg, anchor="mm")
 
-        f_t = T.font((15.5 if not done_card else 15.0) * k, True)
-        title = ellipsize(_MEAS, card.get("title") or "", f_t, (x1 - 15) - tx0)
-        tdraw.text((tx0 * k, (pad_top + 23) * k), title, font=f_t,
-                   fill=T.INK if not done_card else T.INK_DONE)
+        f_t = T.font(16 * k, True)
+        title = ellipsize(_MEAS, card.get("title") or "（无标题）", f_t, (x1 - 15) - tx0)
+        tdraw.text((tx0 * k, (pad_top + 23) * k), title, font=f_t, fill=T.INK)
 
         if not compact:
-            bits = []
-            if card.get("source"):
-                bits.append(card["source"])
-            if card.get("owner") and card["owner"] not in ("未指定", "-"):
-                bits.append(card["owner"])
-            if card.get("due") and card["due"] not in ("无明确截止", "-"):
-                bits.append(card["due"])
+            source = (card.get("source") or "").strip()
+            owner = (card.get("owner") or "").strip()
+            due = (card.get("due") or "").strip()
             f_m = T.font(10.5 * k)
-            meta_txt = ellipsize(_MEAS, "  ·  ".join(bits[:3]), f_m, (x1 - 15) - tx0)
-            tdraw.text((tx0 * k, (pad_top + 46) * k), meta_txt, font=f_m,
-                       fill=T.INK_2 if not done_card else T.INK_DONE)
+            meta_x = tx0
+            due_soon = bool(due) and any(t in due for t in ("今天", "今日", "明天", "明日"))
+            for label, value in (("来自", source), ("负责", owner), ("截止", due)):
+                if not value or value in ("未指定", "-", "无明确截止"):
+                    continue
+                # 「来自 张经理」两段色：标签暗、内容亮，一眼分得清
+                lw = _text_len(_MEAS, label + " ", f_m) / k
+                tdraw.text((meta_x * k, (pad_top + 46) * k), label + " ", font=f_m,
+                           fill=T.INK_3)
+                val_max = (x1 - 15) - (meta_x + lw)
+                val = ellipsize(_MEAS, value, f_m, val_max)
+                if label == "截止" and due_soon:
+                    vcol = T.WARN
+                else:
+                    vcol = T.INK_2
+                tdraw.text(((meta_x + lw) * k, (pad_top + 46) * k), val, font=f_m,
+                           fill=vcol)
+                meta_x += lw + _text_len(_MEAS, val, f_m) / k + 14
+                if meta_x > x1 - 15:
+                    break
 
         # 命中区（窗口逻辑坐标，已裁到可视区）
         hy0 = max(0.0, y0)
@@ -608,7 +686,10 @@ def draw_panel(state: Dict, k: float, backdrop: Optional[Image.Image],
         put(tx, 71, " · ".join(meta), 10.5, T.INK_3)
 
     if done_list:
-        put(px, footer_y, "已完成 %d 条 · 收在右上角" % len(done_list), 11.5, T.INK_3)
+        if state.get("done_expanded"):
+            put(px, footer_y, "点击已完成的卡片可以恢复", 11.5, T.INK_3)
+        else:
+            put(px, footer_y, "已完成 %d 条 · 收在下方归档栏" % len(done_list), 11.5, T.INK_3)
     else:
         put(px, footer_y, "今天没有已完成的任务", 11.5, T.INK_3)
 

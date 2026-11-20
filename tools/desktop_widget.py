@@ -135,7 +135,7 @@ def main(argv=None) -> int:
 
     app = Widget(demo=args.demo, start_mode=args.mode)
     print("悬浮窗已启动。拖到屏幕左右边缘 24px 内会自动吸附。")
-    print("右键玻璃球/面板可打开菜单，选「退出」结束。")
+    print("离开面板约 5 秒自动收成右侧细条，鼠标移到细条上会重新展开；右键玻璃球/面板可打开菜单，选「退出」结束。")
     try:
         app.run()
     except BaseException:

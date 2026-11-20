@@ -100,7 +100,6 @@ class Widget:
         self._last_topmost = 0.0
         self.done = DoneStore()
         self._fly = None
-        self.thumb_hover = -1
         self.scroll = 0.0
         self.scroll_target = 0.0
         self._ball_click_job: Optional[float] = None
@@ -214,7 +213,6 @@ class Widget:
             "done_expanded": self.done_expanded,
             "hover": self.hover,
             "hover_key": self.hover_key,
-            "thumb_index": self.thumb_hover,
             "generated_at": meta.get("generated_at") or "",
             "stale_hours": self.store.stale_hours(),
             "groups": meta.get("groups") or 0,
@@ -422,10 +420,19 @@ class Widget:
         self.state.save()
         self._last_leave = time.perf_counter()
 
-    def to_sliver(self) -> None:
-        if self.mode != "expanded" or self.anim or not self.side:
+    def to_sliver(self, auto: bool = False) -> None:
+        if self.mode != "expanded" or self.anim:
             return
+        if not self.side:
+            if not auto:
+                return
+            # 自动收缩时用户可能没把面板贴边：按用户习惯贴到右侧
+            self.side = "right"
+            self.state.set(side="right")
+            self.state.save()
         self._animate("sliver", dur_ms=int(T.ANIM_MS * 0.85))
+        self.state.set(mode="sliver")
+        self.state.save()
 
     # ------------------------------------------------------------ 鼠标
 
@@ -472,18 +479,17 @@ class Widget:
         k = self.k
         hit = self._hit_at(cx / k, cy / k)
         idx = hit["index"] if hit and hit["kind"] == "card" else -1
-        key = hit["kind"] if hit and hit["kind"] in ("collapse", "footer", "ball",
-                                                     "check", "thumb") else ""
-        thumb_i = hit["index"] if hit and hit["kind"] == "thumb" else -1
-        if (idx, key, thumb_i) != (self.hover, self.hover_key, self.thumb_hover):
-            self.hover, self.hover_key, self.thumb_hover = idx, key, thumb_i
+        key = hit["kind"] if hit and hit["kind"] in ("collapse", "ball",
+                                                     "check", "archive") else ""
+        if (idx, key) != (self.hover, self.hover_key):
+            self.hover, self.hover_key = idx, key
             win32.user32.SetCursor(win32.cursor(hand=bool(hit)))
             if not self.anim:
                 self.render(ss=1)
 
     def _hover_clear(self) -> None:
-        if self.hover != -1 or self.hover_key or self.thumb_hover != -1:
-            self.hover, self.hover_key, self.thumb_hover = -1, "", -1
+        if self.hover != -1 or self.hover_key:
+            self.hover, self.hover_key = -1, ""
             win32.user32.SetCursor(win32.cursor(False))
 
     def _on_up(self, cx: int, cy: int) -> None:
@@ -504,17 +510,18 @@ class Widget:
         now = time.perf_counter()
         if kind == "collapse":
             self.to_ball()
-        elif kind == "footer":
+        elif kind == "archive":
             self.done_expanded = not self.done_expanded
             self.state.set(done_expanded=self.done_expanded)
             self.state.save()
             self.render(ss=1)
         elif kind == "check":
             self._complete_card(hit.get("card") or {})
-        elif kind == "thumb":
-            self._restore_card(hit.get("card") or {})
         elif kind == "card":
-            self._open_report(hit.get("card") or {})
+            if hit.get("card", {}).get("done"):
+                self._restore_card(hit.get("card") or {})
+            else:
+                self._open_report(hit.get("card") or {})
         elif kind == "ball":
             if self._suppress_up:
                 # 双击序列里的第二次抬起，别再排一次展开
@@ -616,8 +623,14 @@ class Widget:
                 return h["rect"]
         return None
 
+    def _rect_of_first(self, kind: str) -> Optional[Tuple[float, float, float, float]]:
+        for h in self.hits:
+            if h["kind"] == kind:
+                return h["rect"]
+        return None
+
     def _complete_card(self, card) -> None:
-        """把任务标成完成：卡片缩小飞进右上角的迷你卡。"""
+        """把任务标成完成：卡片缩小飞进列表底部的归档栏。"""
         if not card:
             return
         from_rect = self._rect_of("card", card)
@@ -636,7 +649,7 @@ class Widget:
         self.scroll_target = min(self.scroll_target, self._max_scroll())
         self.render(ss=1)
 
-        to_rect = self._rect_of("thumb", card)
+        to_rect = self._rect_of_first("archive")
         _dbg("complete", "from", from_rect, "to", to_rect, "src", src.size if src else None)
         if src is not None and from_rect and to_rect:
             # t0 留空，等第一帧真正执行时再起算——否则前面被消息队列堵掉的时间
@@ -746,10 +759,10 @@ class Widget:
             if self._inside:
                 self._inside = False
                 self._last_leave = now
-            # 这里**故意不做自动收起**。
-            # 以前鼠标一离开就缩成细条/玻璃球，用户每次都在问"卡片呢？"——
-            # 待办卡片的意义就是一直摆在眼前，自己消失是最糟的行为。
-            # 想收起请点标题栏右侧的箭头（或右键菜单），那是明确的用户动作。
+            # 用户要求：鼠标点击其他区域（离开面板）几秒后，自动收成右侧细条；
+            # 鼠标移到细条上会重新展开（悬停逻辑在 sliver 分支）。
+            if now - self._last_leave > T.HIDE_DELAY_MS / 1000.0:
+                self.to_sliver(auto=True)
 
     # ------------------------------------------------------------ 窗口过程
 
