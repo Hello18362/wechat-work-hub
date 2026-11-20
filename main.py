@@ -35,6 +35,34 @@ RED = "\033[31m"
 RESET = "\033[0m"
 
 
+def _console_ok_marks() -> tuple:
+    """按 stdout 编码选打勾打叉符号，避免 cp936 控制台下 UnicodeEncodeError。
+
+    非 UTF-8 编码（如 Windows 默认的 cp936/gbk）根本编不出 ✓/✗（U+2713/U+2717），
+    换成纯 ASCII 的 [OK]/[X]；UTF-8 环境保持原来的符号。
+    """
+    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
+    if encoding in ("", "utf-8", "utf8", "ascii") or "utf" in encoding:
+        return "✓", "✗"
+    return "[OK]", "[X]"
+
+
+MARK_OK, MARK_BAD = _console_ok_marks()
+
+
+def _reconfigure_console() -> None:
+    """把 stdout/stderr 切到 errors="replace"，任何打不出的字符降级成 ? 而不是抛异常。
+
+    这是 cp936 控制台的最后一道保险：即使代码里漏了一个 ✗ 之类的符号，
+    也只会显示成问号，不会让整个程序中断退出。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - 老解释器/被替换过的流不支持，忽略
+            pass
+
+
 def banner(version: str = "0.1.0") -> str:
     """返回启动横幅。"""
     return f"""{CYAN}
@@ -136,7 +164,7 @@ def list_groups(cfg) -> int:
 
     client = build_client_from_config(cfg)
     if not client.health():
-        print(f"{RED}✗ 连不上 chatlog{RESET}（{cfg.get('chatlog', {}).get('api_base')}）")
+        print(f"{RED}{MARK_BAD} 连不上 chatlog{RESET}（{cfg.get('chatlog', {}).get('api_base')}）")
         return 1
 
     configured = {g["name"] for g in load_groups()}
@@ -159,7 +187,7 @@ def serve(cfg) -> int:
     try:
         from web.server import run_server
     except ImportError as exc:
-        print(f"{RED}✗ 控制台模块加载失败：{exc}{RESET}")
+        print(f"{RED}{MARK_BAD} 控制台模块加载失败：{exc}{RESET}")
         return 1
     return run_server(cfg)
 
@@ -211,6 +239,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     Returns:
         退出码：0 成功，1 运行失败，2 参数错误。
     """
+    _reconfigure_console()
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -220,7 +249,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         cfg = load_settings()
     except ConfigError as exc:
-        print(f"{RED}✗ 配置加载失败：{exc}{RESET}")
+        print(f"{RED}{MARK_BAD} 配置加载失败：{exc}{RESET}")
         return 1
 
     if args.verbose:
@@ -254,7 +283,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         result = run_pipeline(cfg, options, progress=progress)
     except PipelineError as exc:
-        print(f"\n{RED}✗ {exc}{RESET}\n")
+        print(f"\n{RED}{MARK_BAD} {exc}{RESET}\n")
         logger.error("流水线终止：%s", exc)
         return 1
     except KeyboardInterrupt:
@@ -264,7 +293,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 130
     except Exception as exc:  # 兜底：任何未预期异常都要给出可诊断信息
         logger.exception("未预期的异常")
-        print(f"\n{RED}✗ 未预期的错误：{exc}{RESET}")
+        print(f"\n{RED}{MARK_BAD} 未预期的错误：{exc}{RESET}")
         print(f"{DIM}完整堆栈已写入 logs/hub.log{RESET}\n")
         return 1
 
