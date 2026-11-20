@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 APP_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "WeChatWorkHub"
 CARDS_FILE = APP_DIR / "cards.json"
 STATE_FILE = APP_DIR / "widget.json"
+DONE_FILE = APP_DIR / "done.json"
 
 PRIORITY_RANK = {"紧急": 0, "高": 1, "重要": 2, "中": 3, "常规": 4, "": 5}
 
@@ -137,6 +138,47 @@ DEFAULT_STATE = {
     "side": "",           # left / right：吸在哪边
     "done_expanded": False,
 }
+
+
+def card_key(card) -> str:
+    """完成状态用「群名 + 标题」做键：调度任务重写 cards.json 也不会丢。"""
+    return "%s|%s" % ((card.get("group") or "").strip(), (card.get("title") or "").strip())
+
+
+class DoneStore:
+    """记录哪些任务被手动标了完成。单独存一个文件，不去改 cards.json。"""
+
+    def __init__(self):
+        self.keys = set()
+        self.load()
+
+    def load(self) -> None:
+        try:
+            with open(DONE_FILE, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+            if isinstance(raw, dict):
+                self.keys = set(str(k) for k in (raw.get("keys") or []))
+        except Exception:
+            self.keys = set()
+
+    def save(self) -> None:
+        ensure_dir()
+        try:
+            with open(DONE_FILE, "w", encoding="utf-8") as fh:
+                json.dump({"keys": sorted(self.keys)}, fh, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def is_done(self, card) -> bool:
+        return card_key(card) in self.keys
+
+    def mark(self, card) -> None:
+        self.keys.add(card_key(card))
+        self.save()
+
+    def unmark(self, card) -> None:
+        self.keys.discard(card_key(card))
+        self.save()
 
 
 class WidgetState:

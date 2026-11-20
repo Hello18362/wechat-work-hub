@@ -132,8 +132,19 @@ def _read_media(client: Any, msg: Any, kind: str, key: Any) -> MediaPart:
     return MediaPart(field="", kind=kind, filename=path.name, payload=payload)
 
 
-def prepare_group(group: str, date_text: str, messages: Sequence[Any], client: Any) -> PreparedGroup:
-    """把一群消息预检成云端 manifest 行和实际附件；失败时不产生上传请求。"""
+def prepare_group(
+    group: str,
+    date_text: str,
+    messages: Sequence[Any],
+    client: Any,
+    *,
+    on_media_error: str = "raise",
+) -> PreparedGroup:
+    """把一群消息预检成云端 manifest 行和实际附件；失败时不产生上传请求。
+
+    on_media_error="raise"（默认）：任一附件取不到就整群失败，避免悄悄漏图。
+    on_media_error="skip"：跳过取不到的附件、该条只发文字，用于 --skip-media-errors。
+    """
     if not messages:
         return PreparedGroup([], [])
     used: set[str] = set()
@@ -164,7 +175,9 @@ def prepare_group(group: str, date_text: str, messages: Sequence[Any], client: A
             try:
                 part = _read_media(client, msg, kind, key)
             except PushError as exc:
-                # 单个附件取不到，不该让整群失败：降级为该条消息只发文字
+                if on_media_error != "skip":
+                    raise
+                # 显式选择降级时：单个附件取不到，该条消息只发文字
                 print(f"  ! {group}：跳过 {kind}（{exc}）", flush=True)
                 continue
             part = MediaPart(
@@ -294,6 +307,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", "-d", default="today", help="today / yesterday / 2026-10-25")
     parser.add_argument("--cloud", default=DEFAULT_CLOUD, help=f"云端地址，默认 {DEFAULT_CLOUD}")
     parser.add_argument("--dry-run", action="store_true", help="只预检和打印统计，不上传、不打印聊天正文")
+    parser.add_argument(
+        "--skip-media-errors",
+        action="store_true",
+        help="附件取不到时只跳过该附件并继续（默认整群失败，避免悄悄漏图）",
+    )
     args = parser.parse_args(argv)
     if args.all and args.group:
         parser.error("--all 不能与 --group 同时使用")
@@ -328,7 +346,13 @@ def main(argv: list[str] | None = None) -> int:
                 if not messages:
                     print(f"○ {group}：无消息")
                     continue
-                prepared = prepare_group(group, day.strftime("%Y-%m-%d"), messages, client)
+                prepared = prepare_group(
+                    group,
+                    day.strftime("%Y-%m-%d"),
+                    messages,
+                    client,
+                    on_media_error="skip" if args.skip_media_errors else "raise",
+                )
                 batches = make_batches(group, day.strftime("%Y-%m-%d"), prepared)
                 total_bytes = sum(len(body) for _, _, body in batches)
                 print(f"· {group}：{len(messages)} 条消息，{len(prepared.media)} 个附件，{total_bytes} 字节，{len(batches)} 批")

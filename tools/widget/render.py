@@ -19,11 +19,11 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional, Tuple
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from . import theme as T
 
-SS = 2  # 形状层超采样倍数
+SS = 1  # 画布倍数。1x + 遮罩羽化 = 2x 的观感、1/3 的成本（见 _frost 注释）
 
 # 量文字宽度用的画布（不参与输出）
 _MEAS = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
@@ -55,9 +55,23 @@ def ellipsize(d: ImageDraw.ImageDraw, s: str, f, max_w: float) -> str:
     return s[:lo] + ell
 
 
+_SHAPE_CACHE: Dict[tuple, Image.Image] = {}
+
+
+def _cached(key, make):
+    hit = _SHAPE_CACHE.get(key)
+    if hit is None:
+        hit = make()
+        if len(_SHAPE_CACHE) > 16:
+            _SHAPE_CACHE.clear()
+        _SHAPE_CACHE[key] = hit
+    return hit
+
+
 def _round_mask(size, box, radius) -> Image.Image:
     m = Image.new("L", size, 0)
-    ImageDraw.Draw(m).rounded_rectangle(box, radius=radius, fill=255)
+    r = max(1.0, min(radius, min(box[2] - box[0], box[3] - box[1]) / 2))
+    ImageDraw.Draw(m).rounded_rectangle(box, radius=r, fill=255)
     return m
 
 
@@ -99,11 +113,12 @@ class Canvas:
     def rounded(self, x0, y0, x1, y1, radius: float = 0,
                 fill=None, outline=None, width: float = 0, pad: float = 2.0) -> None:
         a = self.a
+        r = max(1.0, min(radius * a, min(x1 - x0, y1 - y0) * a / 2))
 
         def _draw(d, ox, oy):
             d.rounded_rectangle(
                 (x0 * a - ox, y0 * a - oy, x1 * a - ox, y1 * a - oy),
-                radius=max(1.0, radius * a), fill=fill, outline=outline,
+                radius=r, fill=fill, outline=outline,
                 width=max(0, int(round(width * a))),
             )
 
@@ -132,14 +147,48 @@ class Canvas:
     def flat(self) -> Image.Image:
         if self.ss == 1:
             return self.img
-        return self.img.resize((self.w, self.h), Image.LANCZOS)
+        # REDUCING_GAP 是 Pillow 专门为降采样做的，比 LANCZOS 快且不糊
+        resample = getattr(Image, "REDUCING_GAP", Image.BILINEAR)
+        return self.img.resize((self.w, self.h), resample)
+
+
+def _vgradient(width: int, height: int, color_fn) -> Image.Image:
+    """竖向渐变：先算一列再横向拉伸，比逐行画矩形快一个数量级。"""
+    height = max(2, int(height))
+    col = Image.new("RGBA", (1, height), (0, 0, 0, 0))
+    for y in range(height):
+        col.putpixel((0, y), color_fn(y / (height - 1)))
+    return col.resize((max(1, int(width)), height), Image.BILINEAR)
 
 
 # ------------------------------------------------------------------ 玻璃
 
+_GLASS_CACHE: Dict[tuple, Image.Image] = {}
+
+
+def frost(w: float, h: float, margin: float, radius: float, k: float,
+          backdrop: Optional[Image.Image], drag: bool, ss: int,
+          fast: bool = False, bkey: int = 0, clear: bool = False) -> Image.Image:
+    """带缓存的玻璃底板。
+
+    玻璃只在「尺寸 / 拖拽 / 背景变化」时重算，hover 之类只重画内容，
+    否则每次悬停都要 100ms+，手感会烂。
+    """
+    key = (int(round(w * k)), int(round(h * k)), round(margin, 2), round(radius, 2),
+           round(k, 3), bool(drag), ss, bool(fast), bkey, bool(clear))
+    hit = _GLASS_CACHE.get(key)
+    if hit is not None:
+        return hit
+    img = _frost(w, h, margin, radius, k, backdrop, drag, ss, fast, clear)
+    if len(_GLASS_CACHE) >= 8:
+        _GLASS_CACHE.clear()
+    _GLASS_CACHE[key] = img
+    return img
+
+
 def _frost(w: float, h: float, margin: float, radius: float, k: float,
            backdrop: Optional[Image.Image], drag: bool, ss: int,
-           fast: bool = False) -> Image.Image:
+           fast: bool = False, clear: bool = False) -> Image.Image:
     """生成玻璃底板（不透明磨砂 + 投影）。
 
     w/h 是**逻辑**尺寸，内部按 k 换成物理像素再乘 ss。
@@ -159,78 +208,123 @@ def _frost(w: float, h: float, margin: float, radius: float, k: float,
     sd = ImageDraw.Draw(sh)
     sm = margin * k * f
     sd.rounded_rectangle(
-        (sm, sm + 5 * k * f,
+        (sm, sm + 1 * k * f,
          max(sm + 2, sh.width - sm),
-         max(sm + 2, sh.height - sm + 5 * k * f)),
+         max(sm + 2, sh.height - sm + 1 * k * f)),
         radius=max(1, min(radius * k * f, min(sh.width, sh.height) / 2)),
         fill=T.SHADOW,
     )
-    sh = sh.filter(ImageFilter.GaussianBlur(max(1.2, 7 * k * f)))
-    out = Image.alpha_composite(out, sh.resize((cw, ch), Image.BILINEAR))
+    sh = sh.filter(ImageFilter.GaussianBlur(max(1.2, 5 * k * f)))
+    sh = sh.resize((cw, ch), Image.BILINEAR)
+    out.paste(sh, (0, 0), sh)
 
-    # --- 磨砂底
-    if backdrop is not None and not drag:
-        if fast:
-            half = (max(8, cw // 2), max(8, ch // 2))
-            bd = backdrop.resize(half, Image.BILINEAR)
-            bd = bd.filter(ImageFilter.GaussianBlur(max(1.0, 4 * k)))
-            bd = bd.resize((cw, ch), Image.BILINEAR)
-        else:
-            bd = backdrop.resize((cw, ch), Image.BILINEAR)
-            bd = bd.filter(ImageFilter.GaussianBlur(max(1.0, 13 * k)))
-        bd = bd.convert("RGBA")
-        # 压暗：让白字有足够对比
-        panel = Image.alpha_composite(bd, Image.new("RGBA", (cw, ch), (12, 12, 14, 216)))
-        # 一点冷调，避免纯黑发死
-        panel = Image.alpha_composite(panel, Image.new("RGBA", (cw, ch), (20, 25, 36, 40)))
+    # --- 磨砂底（整条链路在半分辨率上做完再放大，省掉三次全画布合成）
+    if clear:
+        # Acrylic 模式：模糊由底层窗口（DWM 实时）提供，这一层只留装饰
+        # （投影 / 描边 / 高光），中间必须全透明才能透出底层。
+        panel = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+    elif backdrop is not None and not drag:
+        half = (max(8, cw // 2), max(8, ch // 2))
+        radius_px = max(1.0, (2 if fast else 1) * k)
+        bd = backdrop.resize(half, Image.BILINEAR).filter(ImageFilter.GaussianBlur(radius_px))
+        # 去一点饱和：磨砂玻璃该是银灰调，不是彩色塑料
+        bd = Image.blend(bd, bd.convert("L").convert("RGB"), 0.34)
+
+        # 逐像素自适应压暗：亮的地方压得深、暗的地方几乎不压。
+        # 均匀 alpha 解决不了「面板一半压在白色网页上」这种情况，会有一半字看不清。
+        gray = bd.convert("L")
+        lo, hi = T.TINT_ALPHA_MIN, T.TINT_ALPHA_MAX
+        lut = [int(lo + (hi - lo) * (v / 255.0) ** 0.9) for v in range(256)]
+        mask = gray.point(lut)
+        panel = Image.composite(Image.new("RGB", half, (12, 12, 14)), bd, mask)
+        panel = Image.blend(panel, Image.new("RGB", half, (22, 28, 44)), 34 / 255.0)
+        # 一层很薄的白色霜：不然黑色桌面上整块窗会"消失"，跟背景糊成一片
+        panel = Image.blend(panel, Image.new("RGB", half, (255, 255, 255)), 12 / 255.0)
+        panel = panel.resize((cw, ch), Image.BILINEAR).convert("RGBA")
         panel.putalpha(255)
     else:
         color = T.TINT_DRAG if drag else T.TINT
         panel = Image.new("RGBA", (cw, ch), color)
 
-    mask = _round_mask((cw, ch), box, rad)
+    def _mk_mask():
+        mk = _round_mask((cw, ch), box, rad)
+        if ss == 1:
+            mk = mk.filter(ImageFilter.GaussianBlur(max(0.45, 0.55 * k)))
+        return mk
+
+    mask = _cached(("mask", cw, ch, round(m, 2), round(rad, 2), ss, round(k, 3)), _mk_mask)
     out.paste(panel, (0, 0), mask)
 
-    # --- 顶部高光（玻璃棱）
-    sheen = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-    sdr = ImageDraw.Draw(sheen)
-    top = m
-    bottom = m + (ch - 2 * m) * 0.40
-    steps = 40
-    for i in range(steps):
-        t = i / (steps - 1)
-        a = int(26 * (1 - t) ** 1.5)
-        y0 = top + (bottom - top) * t
-        y1 = top + (bottom - top) * (t + 1 / steps)
-        sdr.rectangle((m, y0, cw - m, y1 + 1), fill=(255, 255, 255, a))
-    keep = Image.new("L", (cw, ch), 0)
-    ImageDraw.Draw(keep).rounded_rectangle(box, radius=rad, fill=255)
-    sheen.putalpha(Image.composite(sheen.getchannel("A"), Image.new("L", (cw, ch), 0), keep))
-    out = Image.alpha_composite(out, sheen)
+    # --- 顶部高光（玻璃棱）：一列渐变再横向拉伸，比逐行画矩形快得多
+    sheen_h = int((ch - 2 * m) * 0.40)
+    if sheen_h > 2:
+        strip = _vgradient(cw - 2 * m, sheen_h,
+                           lambda t: (255, 255, 255, int(2 * (1 - t) ** 1.5)))
+        sheen = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+        sheen.paste(strip, (int(m), int(m)))
+        sheen.putalpha(Image.composite(sheen.getchannel("A"),
+                                       Image.new("L", (cw, ch), 0), mask))
+        out = Image.alpha_composite(out, sheen)
 
     # --- 描边
-    stroke_w = max(1, int(round(1.1 * k * ss)))
-    edge = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-    ImageDraw.Draw(edge).rounded_rectangle(box, radius=rad, outline=T.BORDER, width=stroke_w)
-    out = Image.alpha_composite(out, edge)
+    if ss == 1:
+        out = _ring_border(out, (cw, ch), box, rad, k, T.BORDER, 1.1)
+    else:
+        stroke_w = max(1, int(round(1.1 * k * ss)))
+        edge = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+        ImageDraw.Draw(edge).rounded_rectangle(box, radius=rad, outline=T.BORDER,
+                                               width=stroke_w)
+        out = Image.alpha_composite(out, edge)
 
-    # --- 顶部亮棱（往下渐隐）
-    hi = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-    ImageDraw.Draw(hi).rounded_rectangle(box, radius=rad, outline=T.BORDER_TOP,
-                                         width=max(1, int(round(1.6 * k * ss))))
-    grad = Image.new("L", (cw, ch), 0)
-    gd = ImageDraw.Draw(grad)
-    fade_to = m + (ch - 2 * m) * 0.26
-    for i in range(36):
-        t = i / 35
-        a = int(255 * (1 - t) ** 2)
-        y0 = m + (fade_to - m) * t
-        y1 = m + (fade_to - m) * (t + 1 / 36)
-        gd.rectangle((0, y0, cw, y1 + 1), fill=a)
-    hi.putalpha(Image.composite(hi.getchannel("A"), Image.new("L", (cw, ch), 0), grad))
-    out = Image.alpha_composite(out, hi)
+    # --- 顶部亮棱（往下渐隐）：只处理上沿那一窄条
+    hi_h = int(max(10, (ch - 2 * m) * 0.26))
+    if ss == 1:
+        ring = _ring_alpha((cw, ch), box, rad, k, 1.6)
+        ring = ring.crop((0, 0, cw, hi_h))
+        fade = _vgradient(cw, hi_h, lambda t: (255, 255, 255, int(255 * (1 - t) ** 2)))
+        a = Image.new("L", (cw, hi_h), 0)
+        a.paste(ImageChops.multiply(ring, fade.getchannel("A")), (0, 0))
+        layer = Image.new("RGBA", (cw, hi_h), (255, 255, 255, 0))
+        lut = [min(255, v * T.BORDER_TOP[3] // 255) for v in range(256)]
+        layer.putalpha(a.point(lut))
+        out.alpha_composite(layer, (0, 0))
+    else:
+        band = Image.new("RGBA", (cw, hi_h), (0, 0, 0, 0))
+        ImageDraw.Draw(band).rounded_rectangle(
+            (m, m, cw - m, ch - m), radius=rad, outline=T.BORDER_TOP,
+            width=max(1, int(round(1.6 * k * ss))))
+        grad = _vgradient(cw, hi_h, lambda t: (255, 255, 255, int(255 * (1 - t) ** 2)))
+        band.putalpha(Image.composite(band.getchannel("A"),
+                                      Image.new("L", (cw, hi_h), 0), grad))
+        out.alpha_composite(band, (0, 0))
 
     return out
+
+
+def _ring_alpha(size, box, rad, k: float, width: float) -> Image.Image:
+    return _cached(("ring", size, round(box[0], 2), round(box[2], 2), round(rad, 2),
+                    round(k, 3), round(width, 2)), lambda: _ring_alpha_raw(size, box, rad, k, width))
+
+
+def _ring_alpha_raw(size, box, rad, k: float, width: float) -> Image.Image:
+    """圆角边缘的「环」：外形状减内形状，再轻微羽化，得到抗锯齿的 1px 细边。"""
+    outer = Image.new("L", size, 0)
+    ImageDraw.Draw(outer).rounded_rectangle(box, radius=rad, fill=255)
+    inset = max(0.8, width * k * 0.5)
+    inner = Image.new("L", size, 0)
+    ImageDraw.Draw(inner).rounded_rectangle(
+        (box[0] + inset, box[1] + inset, box[2] - inset, box[3] - inset),
+        radius=max(1.0, rad - inset), fill=255)
+    ring = ImageChops.subtract(outer, inner)
+    return ring.filter(ImageFilter.GaussianBlur(max(0.4, 0.5 * k)))
+
+
+def _ring_border(out: Image.Image, size, box, rad, k: float, color, width: float):
+    ring = _ring_alpha(size, box, rad, k, width)
+    lut = [min(255, v * color[3] // 255) for v in range(256)]
+    layer = Image.new("RGBA", size, (color[0], color[1], color[2], 0))
+    layer.putalpha(ring.point(lut))
+    return Image.alpha_composite(out, layer)
 
 
 # ------------------------------------------------------------------ 图标
@@ -258,53 +352,55 @@ def _arrow_right(cv: Canvas, cx: float, cy: float, size: float, color, width: fl
 # ------------------------------------------------------------------ 布局
 
 def layout_cards(cards: List[Dict], done_expanded: bool):
-    """返回 [(card, (x0,y0,x1,y1))]，逻辑单位，相对面板左上角。"""
-    top, bot = T.CARDS_TOP, T.CARDS_BOTTOM
+    """返回 (rows, content_h)。
+
+    rows: [(card, (x0, y0, x1, y1))]，y 相对**卡片区顶部**，不含滚动偏移。
+    content_h: 所有卡片占用的总高度，比可视区大就需要滚动。
+    """
+    region_h = T.CARDS_BOTTOM - T.CARDS_TOP
     undone = [c for c in cards if not c.get("done")][: T.MAX_CARDS]
-    done = [c for c in cards if c.get("done")]
-    show_done = done[:2] if done_expanded else []
 
     gap = T.CARD_GAP
-    done_h = 56
-    reserve = len(show_done) * (done_h + gap)
     n = max(1, len(undone))
-    h = (bot - top - reserve - gap * (n - 1)) / n
-    h = max(66.0, min(h, 120.0))
+
+    if n <= 6:
+        # 6 张以内铺满可视区（就是原来那版的高度关系）
+        h = (region_h - gap * (n - 1)) / n
+        h = max(T.CARD_MIN_H, min(h, 120.0))
+    else:
+        # 超过 6 张：固定高度，靠滚动看剩下的
+        h = 92.0
 
     rows = []
     x0, x1 = T.PAD_X, T.PANEL_W - T.PAD_X
-    y = top
+    y = 0.0
     for card in undone:
         rows.append((card, (x0, y, x1, y + h)))
         y += h + gap
-    if show_done:
-        y = max(y + 2, bot - reserve)
-        for card in show_done:
-            if y + done_h > bot:
-                break
-            rows.append((card, (x0, y, x1, y + done_h)))
-            y += done_h + gap
-    return rows
+    content_h = (y - gap) if rows else 0.0
+    return rows, content_h
 
 
 # ------------------------------------------------------------------ 面板
 
 def draw_panel(state: Dict, k: float, backdrop: Optional[Image.Image],
-               ss: int = SS, fast: bool = False) -> Tuple[Image.Image, List[Dict]]:
+               ss: int = SS, fast: bool = False, bkey: int = 0,
+               clear: bool = False) -> Tuple[Image.Image, List[Dict]]:
     """画展开态面板。返回 (整图, 命中区列表)。"""
     W = T.PANEL_W + T.PANEL_MARGIN * 2
     H = T.PANEL_H + T.PANEL_MARGIN * 2
     margin = T.PANEL_MARGIN
     hits: List[Dict] = []
 
-    base = _frost(W, H, margin, T.PANEL_RADIUS, k, backdrop,
-                  state.get("drag", False), ss, fast)
+    base = frost(W, H, margin, T.PANEL_RADIUS, k, backdrop,
+                 state.get("drag", False), ss, fast, bkey, clear)
     cv = Canvas(W, H, k, ss, base)
 
-    px = margin + T.PAD_X                 # 面板内左右起点
+    px = margin + T.PAD_X
     pr = margin + T.PANEL_W - T.PAD_X
 
     cards = state.get("cards") or []
+    done_list = [c for c in cards if c.get("done")]
     undone = [c for c in cards if not c.get("done")]
     done = [c for c in cards if c.get("done")]
     urgent = [c for c in undone if c.get("priority") in ("紧急", "高")]
@@ -314,154 +410,211 @@ def draw_panel(state: Dict, k: float, backdrop: Optional[Image.Image],
     # ---- 收起按钮
     btn = 30.0
     bx1, bx0 = pr, pr - btn
-    by0 = margin + 46
+    by0 = margin + 52
     by1 = by0 + btn
     cv.rounded(bx0, by0, bx1, by1, btn / 2,
                fill=(255, 255, 255, 30) if hover_key == "collapse" else (255, 255, 255, 14))
     _chevron_down(cv, (bx0 + bx1) / 2, (by0 + by1) / 2 + 1, 9, T.INK_2, 1.5)
     hits.append({"kind": "collapse", "rect": (bx0, by0, bx1, by1)})
 
-    # ---- 卡片
-    rows = layout_cards(cards, state.get("done_expanded", False))
+    # ---- 头部右侧：已完成任务的迷你卡（Mac 坞那种缩略图），点一下恢复
+    thumbs = (done_list or [])[: T.THUMB_MAX]
+    if thumbs:
+        tw, th, gap = T.THUMB_W, T.THUMB_H, T.THUMB_GAP
+        strip_right = bx0 - 10
+        ty0 = margin + 67 - th / 2
+        ty1 = ty0 + th
+        start = strip_right - len(thumbs) * tw - (len(thumbs) - 1) * gap
+        for i, card in enumerate(thumbs):
+            tx0 = start + i * (tw + gap)
+            hot = hover_key == "thumb" and state.get("thumb_index") == i
+            cv.rounded(tx0, ty0, tx0 + tw, ty1, 6,
+                       fill=(255, 255, 255, 46 if hot else 26),
+                       outline=(255, 255, 255, 90 if hot else 46), width=1.0)
+            # 三根小横线，暗示"刚才那张卡"
+            for j, wfrac in enumerate((0.62, 0.44, 0.3)):
+                ly = ty0 + 7 + j * 4
+                cv.rounded(tx0 + 6, ly, tx0 + 6 + (tw - 12) * wfrac, ly + 1.4, 0.7,
+                           fill=(255, 255, 255, 110 if hot else 74))
+            hits.append({"kind": "thumb", "index": i, "card": card,
+                         "rect": (tx0 - 1, ty0 - 1, tx0 + tw + 1, ty1 + 1)})
+
+    # ---- 卡片区（独立图层，天然被区域裁切，才能滚）
+    rows, content_h = layout_cards(cards, state.get("done_expanded", False))
+    region_h = T.CARDS_BOTTOM - T.CARDS_TOP
+    max_scroll = max(0.0, content_h - region_h)
+    scroll = min(max(0.0, float(state.get("scroll") or 0.0)), max_scroll)
+
+    card_cv = Canvas(T.PANEL_W, region_h, k, ss)
+    card_tx = Canvas(T.PANEL_W, region_h, k, ss)   # 文字层（1x 直接画）
+    tdraw = ImageDraw.Draw(card_tx.img)
+    geos = []
+
     for idx, (card, rect) in enumerate(rows):
         x0, y0, x1, y1 = rect
-        ax0, ay0, ax1, ay1 = margin + x0, margin + y0, margin + x1, margin + y1
-        hot = idx == hover_idx
+        y0 -= scroll
+        y1 -= scroll
+        if y1 < -4 or y0 > region_h + 4:
+            continue
+
+        ch = y1 - y0
+        compact = ch < 70
+        pad_top = y0 + (11 if compact else max(11.0, (ch - 62) / 2))
         done_card = bool(card.get("done"))
-
-        cv.rounded(ax0, ay0, ax1, ay1, T.CARD_RADIUS,
-                   fill=T.CARD_FILL_HOVER if hot else T.CARD_FILL,
-                   outline=T.CARD_BORDER_HOVER if hot else T.CARD_BORDER,
-                   width=1.0)
-
+        hot = idx == hover_idx
         pri = card.get("priority") or "常规"
-        if pri in ("紧急", "高") and not done_card:
-            cv.rounded(ax0 + 0.5, ay0 + 16, ax0 + 3.5, ay1 - 16, 2, fill=T.ACCENT_DIM)
 
-        # 优先级 chip
+        # --- 形状
+        card_cv.rounded(x0, y0, x1, y1, T.CARD_RADIUS,
+                        fill=T.CARD_FILL_HOVER if hot else T.CARD_FILL,
+                        outline=T.CARD_BORDER_HOVER if hot else T.CARD_BORDER,
+                        width=1.0)
+        if pri in ("紧急", "高") and not done_card:
+            card_cv.rounded(x0 + 0.5, y0 + 14, x0 + 3.5, y1 - 14, 2, fill=T.ACCENT_DIM)
+
         chip_h = 19.0
         chip_w = _text_len(_MEAS, pri, T.font(10.5 * k, True)) / k + 16
-        cx1 = ax1 - 14
+        cx1 = x1 - 14
         cx0 = cx1 - chip_w
+        chip_y = pad_top + 6.5 - chip_h / 2
         bg, _fg = T.PRIORITY.get(pri, T.PRIORITY["常规"])
-        cv.rounded(cx0, ay0 + 12, cx1, ay0 + 12 + chip_h, chip_h / 2, fill=bg)
+        card_cv.rounded(cx0, chip_y, cx1, chip_y + chip_h, chip_h / 2, fill=bg)
+        if hot:
+            _arrow_right(card_cv, x1 - 12, (y0 + y1) / 2, 9, T.INK_2, 1.5)
 
-        hits.append({"kind": "card", "index": idx,
-                     "rect": (ax0, ay0, ax1, ay1), "card": card})
-        if idx == hover_idx:
-            _arrow_right(cv, ax1 - 12, (ay0 + ay1) / 2, 9, T.INK_2, 1.5)
+        # --- 左侧「完成」圆钮
+        ccx = x0 + 15 + T.CHECK_R
+        ccy = (y0 + y1) / 2
+        check_hot = (hover_idx == idx and (state.get("hover_key") == "check"))
+        if check_hot:
+            card_cv.ellipse(ccx - T.CHECK_R, ccy - T.CHECK_R, ccx + T.CHECK_R, ccy + T.CHECK_R,
+                            fill=T.ACCENT)
+            _check(card_cv, ccx, ccy, T.CHECK_R * 1.05, (255, 255, 255, 255), 2.0)
+        else:
+            card_cv.ellipse(ccx - T.CHECK_R, ccy - T.CHECK_R, ccx + T.CHECK_R, ccy + T.CHECK_R,
+                            outline=(255, 255, 255, 78), width=1.3)
+        # 命中区必须换算成窗口坐标（卡片内坐标是相对卡片区的）
+        hits.append({"kind": "check", "index": idx, "card": card,
+                     "rect": (margin + ccx - T.CHECK_R - 3,
+                              margin + T.CARDS_TOP + ccy - T.CHECK_R - 3,
+                              margin + ccx + T.CHECK_R + 3,
+                              margin + T.CARDS_TOP + ccy + T.CHECK_R + 3)})
 
-    # ---- 底部分隔线
+        # --- 文字（让出左侧圆钮的位置）
+        tx0 = x0 + 15 + T.CHECK_R * 2 + 9
+        f_g = T.font(10.5 * k)
+        room = (x1 - 14 - chip_w - 10) - tx0
+        gname = ellipsize(_MEAS, card.get("group") or "未知群", f_g, room)
+        tdraw.text((tx0 * k, pad_top * k), gname, font=f_g,
+                   fill=T.INK_3 if not done_card else T.INK_DONE)
+
+        _bg, fg = T.PRIORITY.get(pri, T.PRIORITY["常规"])
+        tdraw.text(((cx0 + chip_w / 2) * k, (chip_y + chip_h / 2 + 0.5) * k), pri,
+                   font=T.font(10.5 * k, True), fill=fg, anchor="mm")
+
+        f_t = T.font((15.5 if not done_card else 15.0) * k, True)
+        title = ellipsize(_MEAS, card.get("title") or "", f_t, (x1 - 15) - tx0)
+        tdraw.text((tx0 * k, (pad_top + 23) * k), title, font=f_t,
+                   fill=T.INK if not done_card else T.INK_DONE)
+
+        if not compact:
+            bits = []
+            if card.get("source"):
+                bits.append(card["source"])
+            if card.get("owner") and card["owner"] not in ("未指定", "-"):
+                bits.append(card["owner"])
+            if card.get("due") and card["due"] not in ("无明确截止", "-"):
+                bits.append(card["due"])
+            f_m = T.font(10.5 * k)
+            meta_txt = ellipsize(_MEAS, "  ·  ".join(bits[:3]), f_m, (x1 - 15) - tx0)
+            tdraw.text((tx0 * k, (pad_top + 46) * k), meta_txt, font=f_m,
+                       fill=T.INK_2 if not done_card else T.INK_DONE)
+
+        # 命中区（窗口逻辑坐标，已裁到可视区）
+        hy0 = max(0.0, y0)
+        hy1 = min(region_h, y1)
+        if hy1 > hy0:
+            hits.append({"kind": "card", "index": idx, "card": card,
+                         "rect": (margin + x0, margin + T.CARDS_TOP + hy0,
+                                  margin + x1, margin + T.CARDS_TOP + hy1)})
+        geos.append(idx)
+
+    layer = card_cv.img
+    layer.alpha_composite(card_tx.img, (0, 0))
+
+    # 能滚的时候，上下边缘渐隐，滚到一半的卡片不会被硬切
+    if max_scroll > 0.5:
+        fade = int(T.SCROLL_FADE * k * ss)
+        if fade > 1:
+            grad = Image.new("L", (1, layer.height), 255)
+            for yy in range(fade):
+                v = int(255 * yy / fade)
+                grad.putpixel((0, yy), v)
+                grad.putpixel((0, layer.height - 1 - yy), v)
+            layer.putalpha(ImageChops.multiply(layer.getchannel("A"),
+                                               grad.resize(layer.size)))
+
+    cv.img.alpha_composite(layer, (int(margin * k * ss), int((margin + T.CARDS_TOP) * k * ss)))
+
+    # 滚动位置指示条（只在内容超出时出现，细到几乎不打扰）
+    if max_scroll > 0.5:
+        bar_x = margin + T.PANEL_W - 9
+        bar_top = margin + T.CARDS_TOP + 4
+        bar_area = region_h - 8
+        bar_h = max(26.0, bar_area * region_h / content_h)
+        bar_y = bar_top + (bar_area - bar_h) * (scroll / max_scroll)
+        cv.rounded(bar_x, bar_y, bar_x + 3, bar_y + bar_h, 1.5,
+                   fill=(255, 255, 255, 86))
+
+    # ---- 底部分隔线 + 完成折叠条
     fy = margin + T.PANEL_H - 56
     cv.line([(px, fy), (pr, fy)], fill=T.DIVIDER, width=1.0)
     footer_y = fy + 16
-    if done:
-        label = "已完成 %d 条" % len(done)
-        fw = _text_len(_MEAS, label, T.font(11.5 * k)) / k
-        icon_x = px + fw + 13
-        if hover_key == "footer":
-            cv.rounded(px - 9, footer_y - 6, icon_x + 9, footer_y + 19, 9,
-                       fill=(255, 255, 255, 18))
-        if state.get("done_expanded"):
-            _chevron_up(cv, icon_x, footer_y + 7, 7, T.INK_3, 1.4)
-        else:
-            _chevron_down(cv, icon_x, footer_y + 6, 7, T.INK_3, 1.4)
-        hits.append({"kind": "footer",
-                     "rect": (px - 9, footer_y - 7, icon_x + 10, footer_y + 20)})
+
 
     img = cv.flat()
 
-    # ---------------------------------------------------------- 文字层（1×）
+    # ---------------------------------------------------------- 头部/底部文字（1×）
     tl = Image.new("RGBA", img.size, (0, 0, 0, 0))
     td = ImageDraw.Draw(tl)
 
     def put(x, y, s, size, color, bold=False, anchor="la"):
         td.text((x * k, y * k), s, font=T.font(size * k, bold), fill=color, anchor=anchor)
 
-    # 顶部小标签 + 更新时间
-    put(px, 20, "今日待办", 11.5, T.INK_3, bold=True)
+    put(px, 26, "今日待办", 11.5, T.INK_3, bold=True)
     gen = state.get("generated_at") or ""
     stale_h = state.get("stale_hours")
     if stale_h is not None and stale_h >= 3:
-        put(pr, 20, "数据为 %d 小时前" % int(stale_h), 11.5, T.WARN, anchor="ra")
+        put(pr, 26, "数据为 %d 小时前" % int(stale_h), 11.5, T.WARN, anchor="ra")
     elif gen:
-        put(pr, 20, "更新于 %s" % (gen[11:16] if len(gen) >= 16 else gen), 11.5,
+        put(pr, 26, "更新于 %s" % (gen[11:16] if len(gen) >= 16 else gen), 11.5,
             T.INK_3, anchor="ra")
 
-    # 大数字
     num = str(len(undone))
     f_num = T.font(38 * k, True)
-    td.text((px * k, 38 * k), num, font=f_num, fill=T.INK)
+    td.text((px * k, 44 * k), num, font=f_num, fill=T.INK)
     nw = td.textlength(num, font=f_num) / k
     tx = px + nw + 9
-    put(tx, 47, "项待办", 12.5, T.INK_2)
+    put(tx, 53, "项待办", 12.5, T.INK_2)
     if urgent:
         w1 = _text_len(td, "项待办", T.font(12.5 * k)) / k
-        put(tx + w1 + 7, 49, "· %d 项紧急" % len(urgent), 11, T.ACCENT, bold=True)
+        put(tx + w1 + 7, 55, "· %d 项紧急" % len(urgent), 11, T.ACCENT, bold=True)
     meta = []
     if state.get("groups"):
         meta.append("%d 个群" % state["groups"])
     if state.get("total_messages"):
         meta.append("%d 条消息" % state["total_messages"])
     if meta:
-        put(tx, 65, " · ".join(meta), 10.5, T.INK_3)
+        put(tx, 71, " · ".join(meta), 10.5, T.INK_3)
 
-    # 卡片文字
-    for idx, (card, rect) in enumerate(rows):
-        x0, y0, x1, y1 = rect
-        ax0, ay0, ax1, ay1 = margin + x0, margin + y0, margin + x1, margin + y1
-        done_card = bool(card.get("done"))
-        pri = card.get("priority") or "常规"
-        chip_h = 19.0
-        chip_w = _text_len(td, pri, T.font(10.5 * k, True)) / k + 16
-        cx1 = ax1 - 14
-        cx0 = cx1 - chip_w
-
-        # 群名
-        f_g = T.font(10.5 * k)
-        room = (ax1 - 14 - chip_w - 10) - (ax0 + 15)
-        gname = ellipsize(td, card.get("group") or "未知群", f_g, room)
-        td.text(((ax0 + 15) * k, (ay0 + 13) * k), gname, font=f_g,
-                fill=T.INK_3 if not done_card else T.INK_DONE)
-
-        # chip 文字
-        _bg, fg = T.PRIORITY.get(pri, T.PRIORITY["常规"])
-        td.text(((cx0 + chip_w / 2) * k, (ay0 + 12 + chip_h / 2 + 0.5) * k), pri,
-                font=T.font(10.5 * k, True), fill=fg, anchor="mm")
-
-        # 标题
-        f_t = T.font((15.5 if not done_card else 15.0) * k, True)
-        title = ellipsize(td, card.get("title") or "", f_t, ax1 - ax0 - 30)
-        td.text(((ax0 + 15) * k, (ay0 + 37) * k), title, font=f_t,
-                fill=T.INK if not done_card else T.INK_DONE)
-
-        # 元信息
-        bits = []
-        if card.get("source"):
-            bits.append(card["source"])
-        if card.get("owner") and card["owner"] not in ("未指定", "-"):
-            bits.append(card["owner"])
-        if card.get("due") and card["due"] not in ("无明确截止", "-"):
-            bits.append(card["due"])
-        if done_card:
-            bits = ["已完成"] + bits[:2]
-        f_m = T.font(10.5 * k)
-        meta_txt = ellipsize(td, "  ·  ".join(bits[:3]), f_m, ax1 - ax0 - 30)
-        td.text(((ax0 + 15) * k, (ay0 + 62) * k), meta_txt, font=f_m,
-                fill=T.INK_3 if not done_card else T.INK_DONE)
-
-    # 底部文字
-    if done:
-        put(px, footer_y, "已完成 %d 条" % len(done), 11.5,
-            T.INK_2 if hover_key == "footer" else T.INK_3)
+    if done_list:
+        put(px, footer_y, "已完成 %d 条 · 收在右上角" % len(done_list), 11.5, T.INK_3)
     else:
         put(px, footer_y, "今天没有已完成的任务", 11.5, T.INK_3)
 
     if state.get("empty") and not rows:
-        put(margin + T.PANEL_W / 2, margin + 300, "今天还没有生成报告", 14,
-            T.INK_2, anchor="mm")
-        put(margin + T.PANEL_W / 2, margin + 326, "右键 →「重新读取数据」", 11,
-            T.INK_3, anchor="mm")
+        put(margin + T.PANEL_W / 2, margin + 300, "今天还没有生成报告", 14, T.INK_2, anchor="mm")
+        put(margin + T.PANEL_W / 2, margin + 326, "右键 →「重新读取数据」", 11, T.INK_3, anchor="mm")
 
     return Image.alpha_composite(img, tl), hits
 
@@ -469,11 +622,12 @@ def draw_panel(state: Dict, k: float, backdrop: Optional[Image.Image],
 # ------------------------------------------------------------------ 收起态玻璃球
 
 def draw_ball(state: Dict, k: float, backdrop: Optional[Image.Image],
-              ss: int = SS, fast: bool = False) -> Tuple[Image.Image, List[Dict]]:
+              ss: int = SS, fast: bool = False, bkey: int = 0,
+              clear: bool = False) -> Tuple[Image.Image, List[Dict]]:
     W = T.BALL + T.BALL_MARGIN * 2
     H = W
-    base = _frost(W, H, T.BALL_MARGIN, T.BALL / 2, k, backdrop,
-                  state.get("drag", False), ss, fast)
+    base = frost(W, H, T.BALL_MARGIN, T.BALL / 2, k, backdrop,
+                 state.get("drag", False), ss, fast, bkey, clear)
     cv = Canvas(W, H, k, ss, base)
 
     cx = cy = W / 2
@@ -511,15 +665,17 @@ def draw_ball(state: Dict, k: float, backdrop: Optional[Image.Image],
 # ------------------------------------------------------------------ 贴边细条
 
 def draw_sliver(state: Dict, k: float, backdrop: Optional[Image.Image],
-                ss: int = SS, fast: bool = False) -> Tuple[Image.Image, List[Dict]]:
+                ss: int = SS, fast: bool = False, bkey: int = 0,
+                clear: bool = False) -> Tuple[Image.Image, List[Dict]]:
     W = T.SLIVER_W + T.SLIVER_MARGIN * 2
     H = T.SLIVER_H + T.SLIVER_MARGIN * 2
-    base = _frost(W, H, T.SLIVER_MARGIN, T.SLIVER_W / 2, k, backdrop, False, ss, fast)
+    base = frost(W, H, T.SLIVER_MARGIN, T.SLIVER_W / 2, k, backdrop,
+                 False, ss, fast, bkey, clear)
     cv = Canvas(W, H, k, ss, base)
 
     m = T.SLIVER_MARGIN
     cv.rounded(m + 0.5, m, W - m - 0.5, H - m, T.SLIVER_W / 2,
-               fill=(255, 255, 255, 60))
+               fill=(255, 255, 255, 196))
     undone = [c for c in (state.get("cards") or []) if not c.get("done")]
     if any(c.get("priority") in ("紧急", "高") for c in undone):
         mid = H / 2

@@ -18,7 +18,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from widget import theme as T, win32  # noqa: E402
+try:
+    from widget import theme as T, win32  # noqa: E402
+except ImportError as exc:
+    # 非 Windows 上这里会抛 ImportError（携带具体原因），
+    # 直接 stacktrace 会让人以为项目坏了，所以打一段人能看懂的话再退出。
+    sys.stderr.write("\n[无法启动桌面悬浮窗]\n%s\n" % exc)
+    raise SystemExit(2)
 
 MUTEX_NAME = "WeChatWorkHubWidget_SingleInstance"
 
@@ -76,7 +82,36 @@ def _snapshot(path: str, mode: str, scale: float) -> int:
     return 0
 
 
+def _write_crash_log() -> None:
+    """把当前异常栈写到 %LOCALAPPDATA%\\WeChatWorkHub\\crash.log。"""
+    import traceback
+    from datetime import datetime
+    from pathlib import Path
+
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "WeChatWorkHub"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        with (base / "crash.log").open("a", encoding="utf-8") as fh:
+            fh.write("\n==== %s ====\n" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            fh.write(traceback.format_exc())
+    except OSError:
+        pass
+
+
 def main(argv=None) -> int:
+    # pythonw 启动时 sys.stdout / sys.stderr 是 None，任何 print 都会抛异常，
+    # 表现就是"窗口刚出现就没了"。这里先兜住，日志另有 widget.log 记录。
+    if sys.stdout is None or sys.stderr is None:
+        try:
+            _null = open(os.devnull, "w", encoding="utf-8")
+        except OSError:
+            _null = None
+        if _null is not None:
+            if sys.stdout is None:
+                sys.stdout = _null
+            if sys.stderr is None:
+                sys.stderr = _null
+
     ap = argparse.ArgumentParser(description="微信群聊待办悬浮窗")
     ap.add_argument("--demo", action="store_true", help="没有 cards.json 时用示例数据")
     ap.add_argument("--mode", choices=["expanded", "ball", "sliver"], default=None,
@@ -86,6 +121,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     win32.enable_dpi_awareness()
+    win32.timer_resolution(True)
 
     if args.snapshot:
         return _snapshot(args.snapshot, args.mode or "expanded", args.scale)
@@ -100,7 +136,15 @@ def main(argv=None) -> int:
     app = Widget(demo=args.demo, start_mode=args.mode)
     print("悬浮窗已启动。拖到屏幕左右边缘 24px 内会自动吸附。")
     print("右键玻璃球/面板可打开菜单，选「退出」结束。")
-    app.run()
+    try:
+        app.run()
+    except BaseException:
+        # pythonw 下异常没有控制台可看，不落盘就等于"窗口莫名其妙没了"。
+        # 启动器 start_widget.py 会把这份日志读出来打给用户。
+        _write_crash_log()
+        raise
+    finally:
+        win32.timer_resolution(False)
     return 0
 
 

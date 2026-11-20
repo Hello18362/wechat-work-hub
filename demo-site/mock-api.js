@@ -25,7 +25,24 @@
 (function () {
   'use strict';
 
-  var realFetch = window.fetch.bind(window);
+  // 单文件版（build_singlefile.py 打包）会把示例报告一起塞进来，
+  // 此时没有 reports/ 目录可读，改走这里的字符串。多文件版为 undefined。
+  var EMBEDDED = window.__DEMO_REPORTS__ || null;
+
+  var realFetch = window.fetch
+    ? window.fetch.bind(window)
+    : function () { return Promise.reject(new Error('当前环境不支持 fetch')); };
+
+  /* 从 "reports/demo-report-1.html" 之类取文件名 */
+  function reportName(url) {
+    var s = String(url || '').split('?')[0].split('#')[0];
+    return s.slice(s.lastIndexOf('/') + 1);
+  }
+
+  function embeddedReport(url) {
+    if (!EMBEDDED) return '';
+    return EMBEDDED[reportName(url)] || '';
+  }
 
   /* ------------------------------------------------------------ 示例数据 */
 
@@ -256,6 +273,8 @@
 
     var parsed;
     try {
+      // file:// 下 origin 是 "file://"（不是 "null"），
+      // new URL('/api/x', 'file://') 会得到 pathname=/api/x，能被下面正确拦截。
       parsed = new URL(url, window.location.origin);
     } catch (e) {
       return realFetch(input, init);
@@ -427,11 +446,22 @@
     title.className = 'demo-ov-title';
     title.textContent = '示例报告 · 演示预览';
 
+    var embedded = embeddedReport(url);
+
     var link = document.createElement('a');
     link.className = 'demo-ov-link';
-    link.href = url;
     link.target = '_blank';
     link.rel = 'noopener';
+    if (embedded) {
+      // 单文件版：报告本身就是字符串，用 Blob 造一个可打开的地址
+      try {
+        link.href = URL.createObjectURL(new Blob([embedded], { type: 'text/html' }));
+      } catch (e) {
+        link.style.display = 'none';
+      }
+    } else {
+      link.href = url;
+    }
     link.textContent = '在新标签打开';
 
     var close = document.createElement('button');
@@ -448,7 +478,11 @@
 
     var frame = document.createElement('iframe');
     frame.className = 'demo-ov-frame';
-    frame.src = url;
+    if (embedded) {
+      frame.setAttribute('srcdoc', embedded);
+    } else {
+      frame.src = url;
+    }
 
     wrap.appendChild(bar);
     wrap.appendChild(frame);
@@ -475,6 +509,8 @@
   /* -------------------------------------------------- 演示模式提示条 */
 
   window.addEventListener('DOMContentLoaded', function () {
+    // 单文件版由打包脚本预先写好提示条（在文档流最前面），这里就不再重复插入
+    if (document.getElementById('demoBanner')) return;
     var bar = document.createElement('div');
     bar.id = 'demoBanner';
     bar.innerHTML =

@@ -13,12 +13,27 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 from ctypes import POINTER, byref, sizeof
 from ctypes import wintypes
 
 from PIL import Image
 
+# 这个模块整个建立在 Win32 API 上（分层窗口、GDI 抓屏、DWM）。
+# 非 Windows 上必须先给出人能看懂的原因，否则报的是
+# "module 'ctypes' has no attribute 'WinDLL'"，用户会以为项目坏了。
+if sys.platform != "win32":  # pragma: no cover - 只在非 Windows 触发
+    raise ImportError(
+        "桌面悬浮窗仅支持 Windows（当前系统：%s）。\n"
+        "它依赖 Win32 分层窗口、GDI 抓屏与 DWM，macOS / Linux 上无法运行。\n"
+        "采集、AI 总结、报告生成、本地控制台这些功能不受影响，可以直接使用。" % sys.platform
+    )
+
 user32 = ctypes.WinDLL("user32", use_last_error=True)
+try:
+    winmm = ctypes.WinDLL("winmm", use_last_error=True)
+except OSError:  # pragma: no cover
+    winmm = None
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -368,8 +383,18 @@ class LayeredWindow:
             if handled:
                 return result
         except Exception:
+            import os
             import traceback
             traceback.print_exc()
+            try:
+                base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+                d = os.path.join(base, "WeChatWorkHub")
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, "widget.log"), "a", encoding="utf-8") as fh:
+                    fh.write("---- wndproc msg=0x%04X ----\n" % msg)
+                    traceback.print_exc(file=fh)
+            except Exception:
+                pass
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
     # -- 绘制 -------------------------------------------------------
@@ -408,7 +433,10 @@ class LayeredWindow:
             img = img.convert("RGBA")
         w, h = img.size
         mem_dc, _bmp, bits, _old = self._ensure_surface(w, h)
-        data = img.tobytes("raw", "BGRA")
+        # UpdateLayeredWindow 配 AC_SRC_ALPHA 时必须给**预乘 alpha**。
+        # PIL 的 RGBA 是非预乘的，直接传过去，半透明像素会被当成"颜色比 alpha 还亮"，
+        # 表现就是该淡淡的卡片变成一块实心白。PIL 的 "RGBa" 模式正好是预乘的。
+        data = img.convert("RGBa").tobytes("raw", "BGRa")
         ctypes.memmove(bits, data, len(data))
 
         screen_dc = user32.GetDC(None)
@@ -522,6 +550,23 @@ def set_backdrop(hwnd: int, kind: int = DWMSBT_TRANSIENTWINDOW) -> bool:
         return hr == 0
     except Exception:
         return False
+
+
+def timer_resolution(high: bool = True) -> None:
+    """把系统定时器精度提到 1ms。
+
+    默认精度约 15.6ms，SetTimer(16) 实际只能跑到 ~30ms 一帧，
+    动画看起来就是一格一格的。退出时务必调 timer_resolution(False) 还原。
+    """
+    if winmm is None:
+        return
+    try:
+        if high:
+            winmm.timeBeginPeriod(1)
+        else:
+            winmm.timeEndPeriod(1)
+    except Exception:
+        pass
 
 
 def windows_build() -> int:

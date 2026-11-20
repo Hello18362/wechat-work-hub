@@ -903,7 +903,7 @@
     viewBtn.addEventListener('click', function (ev) {
       ev.stopPropagation();
       if (run.html) {
-        window.open('/reports/' + encodeURIComponent(run.html), '_blank');
+        window.open('reports/' + encodeURIComponent(run.html), '_blank');
       } else {
         openDetail(card, run);
       }
@@ -951,7 +951,7 @@
 
     if (run.html) {
       item('打开 HTML 报告', false, function () {
-        window.open('/reports/' + encodeURIComponent(run.html), '_blank');
+        window.open('reports/' + encodeURIComponent(run.html), '_blank');
         close();
       });
     }
@@ -1008,7 +1008,7 @@
     var openBtn = $('#modalOpenHtml');
     if (run.html) {
       openBtn.hidden = false;
-      openBtn.onclick = function () { window.open('/reports/' + encodeURIComponent(run.html), '_blank'); };
+      openBtn.onclick = function () { window.open('reports/' + encodeURIComponent(run.html), '_blank'); };
     } else {
       openBtn.hidden = true;
     }

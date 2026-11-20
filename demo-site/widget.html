@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>桌面悬浮窗 · 演示版</title>
+<style>
+:root{
+  --panel-w: 482px;
+  --panel-h: 780px;
+  --pad-x: 26px;
+  --card-gap: 12px;
+  --ink: #f2f1ef;
+  --ink-2: #b6b4b1;
+  --ink-3: #a9a7a4;
+  --accent: #ff5c28;
+}
+*{ box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+html,body{ height:100%; margin:0; }
+body{
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  display:flex; align-items:center; justify-content:center;
+  overflow:hidden; user-select:none;
+  background: #10131a;
+}
+
+/* ---------------- 背景：三套，按键 1/2/3 切换 ---------------- */
+.desk{ position:fixed; inset:0; transition: background .5s ease; }
+.desk[data-bg="sunset"]{
+  background:
+    radial-gradient(1100px 700px at 78% 78%, rgba(255,196,138,.85), transparent 62%),
+    radial-gradient(900px 600px at 22% 18%, rgba(88,122,168,.75), transparent 60%),
+    linear-gradient(165deg, #17202f 0%, #2a3a4d 38%, #6d5a58 62%, #c9885c 82%, #f2b988 100%);
+}
+.desk[data-bg="dark"]{
+  background:
+    radial-gradient(900px 600px at 30% 20%, rgba(46,74,102,.55), transparent 65%),
+    radial-gradient(800px 600px at 75% 80%, rgba(96,54,74,.45), transparent 65%),
+    linear-gradient(160deg, #0d1117 0%, #151b24 50%, #0a0e13 100%);
+}
+.desk[data-bg="paper"]{
+  background:
+    repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0) 0 22px, rgba(60,60,70,.10) 22px 27px,
+      rgba(0,0,0,0) 27px 46px, rgba(60,60,70,.06) 46px 50px),
+    radial-gradient(560px 360px at 76% 22%, rgba(120,140,170,.16), transparent 70%),
+    linear-gradient(160deg, #fbfaf8 0%, #f1efeb 55%, #e4e1dc 100%);
+}
+/* 背景上的"桌面图标"碎片，让玻璃有东西可透 */
+.frag{ position:fixed; border-radius:14px; filter: blur(1px); opacity:.5; pointer-events:none; }
+
+/* ---------------- 舞台缩放 ---------------- */
+.stage{
+  position:relative; width:var(--panel-w); height:var(--panel-h);
+  transform-origin:center center; transition: transform .3s ease;
+}
+
+/* ---------------- 面板 ---------------- */
+.panel{
+  position:absolute; inset:0;
+  border-radius:22px;
+  background: rgba(15,15,19,.56);
+  -webkit-backdrop-filter: blur(26px) saturate(165%);
+  backdrop-filter: blur(26px) saturate(165%);
+  border:1px solid rgba(255,255,255,.14);
+  box-shadow:
+    0 26px 64px rgba(0,0,0,.48),
+    0 2px 8px rgba(0,0,0,.22),
+    inset 0 1px 0 rgba(255,255,255,.14);
+  overflow:hidden;
+  transform-origin: calc(100% - 22px) 22px;   /* 收起时朝右上角缩 */
+  transition: transform .26s cubic-bezier(.22,1.2,.36,1), opacity .2s ease, border-radius .26s ease;
+  display:flex; flex-direction:column;
+}
+/* 浅色背景：必须压得更深，否则白字对比度不够（浏览器做不到逐像素自适应） */
+.desk[data-bg="paper"] + .stage .panel{
+  background: rgba(12,12,16,.80);
+  border-color: rgba(255,255,255,.20);
+}
+.desk[data-bg="paper"] + .stage .card{
+  background: rgba(255,255,255,.13);
+  border-color: rgba(255,255,255,.18);
+}
+
+.panel::after{   /* 顶部玻璃棱 */
+  content:""; position:absolute; inset:0 0 auto 0; height:100px;
+  background:linear-gradient(rgba(255,255,255,.10), transparent);
+  pointer-events:none;
+}
+
+/* ---------------- 头部 ---------------- */
+.head{ position:relative; padding:26px var(--pad-x) 0; flex:none; }
+.head-top{ display:flex; justify-content:space-between; align-items:center; height:16px; }
+.label{ font-size:11.5px; font-weight:600; letter-spacing:.06em; color:var(--ink-3); }
+.stamp{ font-size:11.5px; color:var(--ink-3); }
+.head-main{ display:flex; align-items:flex-end; gap:9px; margin-top:8px; }
+.big{ font-size:38px; font-weight:700; line-height:1; color:var(--ink); letter-spacing:-.02em; }
+.big-unit{ font-size:12.5px; color:var(--ink-2); padding-bottom:5px; }
+.pill{
+  font-size:11px; font-weight:700; color:#ff9c7a;
+  padding-bottom:6px;
+}
+.meta{ font-size:10.5px; color:var(--ink-3); margin-top:9px; }
+
+/* 收起按钮 */
+.collapse{
+  position:absolute; right:var(--pad-x); top:52px;
+  width:30px; height:30px; border-radius:15px;
+  background:rgba(255,255,255,.14); border:none; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  transition: background .16s ease;
+}
+.collapse:hover{ background:rgba(255,255,255,.30); }
+.collapse svg{ opacity:.85; }
+
+/* 已完成迷你卡（右上角） */
+.thumbs{
+  position:absolute; right:66px; top:57px;
+  display:flex; gap:6px; align-items:center; height:22px;
+}
+.thumb{
+  width:34px; height:22px; border-radius:6px; cursor:pointer;
+  background:rgba(255,255,255,.20);
+  border:1px solid rgba(255,255,255,.22);
+  display:flex; flex-direction:column; justify-content:center; gap:2.5px;
+  padding:0 6px; transition: background .16s ease, transform .16s ease;
+}
+.thumb:hover{ background:rgba(255,255,255,.34); transform:translateY(-1px); }
+.thumb i{ display:block; height:1.5px; border-radius:1px; background:rgba(255,255,255,.55); }
+.thumb i:nth-child(2){ width:70%; }
+.thumb i:nth-child(3){ width:45%; }
+
+/* ---------------- 卡片区 ---------------- */
+.list-wrap{ position:relative; flex:1; margin:14px 0 0; overflow:hidden; }
+.list{
+  height:100%; overflow-y:auto; padding:0 var(--pad-x);
+  scrollbar-width:none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+.list::-webkit-scrollbar{ width:0; }
+.fade-top,.fade-bot{
+  position:absolute; left:var(--pad-x); right:var(--pad-x); height:14px;
+  pointer-events:none; z-index:2;
+}
+.fade-top, .fade-bot{ display:none; }
+
+.card{
+  position:relative;
+  display:flex; align-items:center; gap:2px;
+  height:92px; margin-bottom:var(--card-gap); overflow:hidden;
+  padding:13px 15px;
+  border-radius:18px;
+  background:rgba(255,255,255,.105);
+  border:1px solid rgba(255,255,255,.12);
+  transition: background .16s ease, border-color .16s ease, transform .16s ease;
+}
+.card:hover{
+  background:rgba(255,255,255,.145);
+  border-color:rgba(255,255,255,.24);
+}
+.card::before{   /* 紧急左侧竖条 */
+  content:""; position:absolute; left:.5px; top:16px; bottom:16px; width:3px;
+  border-radius:2px; background:var(--accent); opacity:0;
+}
+.card[data-pri="紧急"]::before,
+.card[data-pri="高"]::before{ opacity:1; }
+
+/* 完成圆钮 */
+.check{
+  flex:none; width:18px; height:18px; border-radius:9px; margin-right:9px;
+  border:1.4px solid rgba(255,255,255,.34);
+  cursor:pointer; position:relative;
+  transition: background .16s ease, border-color .16s ease;
+}
+.check:hover{ background:var(--accent); border-color:var(--accent); }
+.check:hover::after{
+  content:""; position:absolute; left:5px; top:2.5px; width:5px; height:9px;
+  border:solid #fff; border-width:0 2px 2px 0; transform:rotate(42deg);
+}
+
+.body{ flex:1; min-width:0; }
+.row1{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.gname{
+  font-size:11px; color:var(--ink-3); white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;
+}
+.chip{
+  flex:none; font-size:10.5px; font-weight:700; padding:3px 8px;
+  border-radius:9px; white-space:nowrap;
+}
+.chip[data-p="紧急"], .chip[data-p="高"]{ background:rgba(255,92,40,.28); color:#ffa084; }
+.chip[data-p="重要"]{ background:rgba(255,176,76,.24); color:#ffca86; }
+.chip[data-p="中"]{ background:rgba(140,170,255,.22); color:#a8c0ff; }
+.chip[data-p="常规"]{ background:rgba(255,255,255,.14); color:#c2c0be; }
+.title{
+  font-size:15.5px; font-weight:600; color:var(--ink); line-height:1.35;
+  margin-top:5px; letter-spacing:.005em;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.meta2{
+  font-size:11px; color:var(--ink-2); margin-top:5px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* ---------------- 底部 ---------------- */
+.foot{
+  flex:none; margin:0 var(--pad-x); padding:16px 0 18px;
+  border-top:1px solid rgba(255,255,255,.10);
+  font-size:11.5px; color:var(--ink-3);
+}
+
+/* 滚动条 */
+.sbar{
+  position:absolute; right:9px; top:4px; width:3px; border-radius:2px;
+  background:rgba(255,255,255,.34); opacity:0; transition:opacity .2s;
+  z-index:3;
+}
+.sbar.on{ opacity:1; }
+
+/* ---------------- 玻璃球 ---------------- */
+.ball{
+  position:fixed; left:50%; top:50%; width:68px; height:68px; border-radius:34px;
+  margin:-34px 0 0 -34px;
+  background: rgba(18,18,22,.62);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border:1px solid rgba(255,255,255,.18);
+  box-shadow: 0 12px 30px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.18);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  cursor:pointer; transform:scale(.2); opacity:0; pointer-events:none;
+  transition: transform .26s cubic-bezier(.22,1.2,.36,1), opacity .2s ease;
+}
+.ball.on{ transform:scale(1); opacity:1; pointer-events:auto; }
+.ball b{ font-size:23px; color:#fff; line-height:1; font-weight:700; }
+.ball span{ font-size:9px; color:#b9b7b5; margin-top:2px; }
+.ball .dot{
+  position:absolute; right:12px; top:12px; width:7px; height:7px; border-radius:4px;
+  background:var(--accent); display:none;
+}
+.ball.urgent .dot{ display:block; }
+
+/* ---------------- 演示提示 ---------------- */
+.back{
+  position:fixed; left:20px; top:18px; z-index:30;
+  display:inline-flex; align-items:center; gap:4px;
+  padding:7px 13px; border-radius:9px;
+  font-size:12.5px; color:rgba(255,255,255,.78); text-decoration:none;
+  background:rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.14);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  transition:background .16s ease, color .16s ease;
+}
+.back:hover{ background:rgba(0,0,0,.42); color:#fff; }
+
+.hint{
+  position:fixed; left:20px; bottom:18px; z-index:20;
+  font-size:11.5px; color:rgba(255,255,255,.55); line-height:1.9;
+  background:rgba(0,0,0,.28); padding:10px 14px; border-radius:10px;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  transition:opacity .3s;
+}
+.hint kbd{
+  font-family:inherit; background:rgba(255,255,255,.14);
+  padding:1px 5px; border-radius:4px; font-size:10.5px;
+}
+.hint.hide{ opacity:0; pointer-events:none; }
+
+/* 飞行动画用的临时卡片 */
+.flying{
+  position:fixed; z-index:99; pointer-events:none;
+  border-radius:18px; background:rgba(255,255,255,.16);
+  border:1px solid rgba(255,255,255,.30);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  transition: all .3s cubic-bezier(.3,.9,.3,1);
+  opacity:1;
+}
+</style>
+</head>
+<body>
+
+<div class="desk" id="desk" data-bg="sunset">
+  <div class="frag" style="left:6%; top:12%; width:150px; height:104px; background:rgba(255,255,255,.14)"></div>
+  <div class="frag" style="left:9%; top:34%; width:120px; height:84px; background:rgba(120,170,255,.18)"></div>
+  <div class="frag" style="right:8%; top:16%; width:180px; height:120px; background:rgba(255,180,120,.16)"></div>
+  <div class="frag" style="right:12%; bottom:12%; width:140px; height:96px; background:rgba(255,255,255,.10)"></div>
+</div>
+
+<div class="stage" id="stage">
+  <div class="panel" id="panel">
+    <div class="head">
+      <div class="head-top">
+        <div class="label">今日待办</div>
+        <div class="stamp" id="stamp">更新于 17:41</div>
+      </div>
+
+      <div class="thumbs" id="thumbs"></div>
+
+      <button class="collapse" id="collapse" title="收起">
+        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2.5 7.5 L6 4 L9.5 7.5" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round" transform="rotate(180 6 6)"/></svg>
+      </button>
+
+      <div class="head-main">
+        <div class="big" id="bigNum">10</div>
+        <div class="big-unit">项待办</div>
+        <div class="pill" id="pill">· 2 项紧急</div>
+      </div>
+      <div class="meta" id="meta">3 个群 · 45 条消息</div>
+    </div>
+
+    <div class="list-wrap">
+      <div class="fade-top"></div>
+      <div class="list" id="list"></div>
+      <div class="fade-bot"></div>
+      <div class="sbar" id="sbar"></div>
+    </div>
+
+    <div class="foot" id="foot">今天没有已完成的任务</div>
+  </div>
+</div>
+
+<div class="ball" id="ball">
+  <div class="dot"></div>
+  <b id="ballNum">10</b>
+  <span>待办</span>
+</div>
+
+<a class="back" href="index.html">‹ 返回控制台</a>
+
+<div class="hint" id="hint">
+  <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 换背景 &nbsp;·&nbsp; 滚轮滚动 &nbsp;·&nbsp; 点左侧圆圈标完成</div>
+  <div>点右上箭头收起成球，点球展开 &nbsp;·&nbsp; <kbd>H</kbd> 隐藏提示</div>
+</div>
+
+<script>
+const CARDS = [
+  { group:"示例 · 班级通知群", title:"本周五 17:50 前确认参赛名单并上报", pri:"紧急",
+    src:"辅导员 14:43", owner:"示例班（张三）", due:"今天 17:50" },
+  { group:"示例 · 班级通知群", title:"核对各班报名人数并汇总报数（用于安排车辆）", pri:"紧急",
+    src:"辅导员 10:01", owner:"各班负责人", due:"无明确截止" },
+  { group:"示例 · 项目协作群", title:"v0.9 提测后完成回归测试并输出记录", pri:"重要",
+    src:"张经理 09:21", owner:"李工", due:"周四" },
+  { group:"示例 · 班级通知群", title:"提醒同学本周参加统一考试，注意场次与教室", pri:"重要",
+    src:"辅导员 10:01", owner:"各班负责人", due:"本周内" },
+  { group:"示例 · 学生干部群", title:"按「一个班一个名额」评选相关荣誉，填写对应模板", pri:"重要",
+    src:"王老师 11:10", owner:"各班负责人", due:"无明确截止" },
+  { group:"示例 · 部门周会群", title:"整理接口联调结论，同步给产品与测试", pri:"重要",
+    src:"李主管 13:14", owner:"陈工", due:"下周例会前" },
+  { group:"示例 · 学生干部群", title:"提交活动物资清单，走统一采购流程", pri:"重要",
+    src:"王老师 11:17", owner:"生活委员", due:"周五" },
+  { group:"示例 · 项目协作群", title:"评审会议纪要归档到共享文档", pri:"常规",
+    src:"小周 15:02", owner:"小周", due:"无明确截止" },
+  { group:"示例 · 班级通知群", title:"统计先进个人奖项名单，仅上报姓名", pri:"常规",
+    src:"辅导员 11:23", owner:"各班负责人", due:"无明确截止" },
+  { group:"示例 · 部门周会群", title:"到现场确认场地并与行政对接", pri:"常规",
+    src:"陈总监 15:56", owner:"李四、王五", due:"无明确截止" }
+];
+
+const $ = (id) => document.getElementById(id);
+const BG = ["sunset", "dark", "paper"];
+const list = $("list"), panel = $("panel"), stage = $("stage"),
+      ball = $("ball"), sbar = $("sbar"), thumbs = $("thumbs");
+
+let done = [];          // 已完成的卡片
+let collapsed = false;
+
+/* ------------------------------------------------ 渲染 */
+function metaText(c){
+  const bits = [];
+  if (c.src) bits.push(c.src.replace(/\s+\d{1,2}:\d{2}$/, ""));   // 群名行只留发言人
+  if (c.owner && c.owner !== "未指定") bits.push(c.owner);
+  if (c.due && c.due !== "无明确截止") bits.push(c.due);
+  return bits.join("  ·  ");
+}
+
+function render(){
+  const undone = CARDS.filter(c => !done.includes(c));
+  list.innerHTML = "";
+
+  undone.forEach((c, i) => {
+    const el = document.createElement("div");
+    el.className = "card";
+    el.dataset.pri = c.pri;
+    el.innerHTML = `
+      <div class="check" data-i="${i}"></div>
+      <div class="body">
+        <div class="row1">
+          <div class="gname">${c.group}</div>
+          <div class="chip" data-p="${c.pri}">${c.pri}</div>
+        </div>
+        <div class="title">${c.title}</div>
+        <div class="meta2">${metaText(c)}</div>
+      </div>`;
+    el.querySelector(".check").addEventListener("click", (e) => {
+      e.stopPropagation();
+      complete(el, c);
+    });
+    list.appendChild(el);
+  });
+
+  // 头部数字
+  const urgent = undone.filter(c => c.pri === "紧急" || c.pri === "高").length;
+  $("bigNum").textContent = undone.length;
+  $("ballNum").textContent = undone.length;
+  $("pill").textContent = urgent ? `· ${urgent} 项紧急` : "";
+  $("pill").style.display = urgent ? "" : "none";
+  $("meta").textContent = `3 个群 · 45 条消息`;
+  $("foot").textContent = done.length
+    ? `已完成 ${done.length} 条 · 收在右上角`
+    : "今天没有已完成的任务";
+  ball.classList.toggle("urgent", urgent > 0);
+
+  // 迷你卡
+  thumbs.innerHTML = "";
+  done.slice(0, 6).forEach((c, i) => {
+    const t = document.createElement("div");
+    t.className = "thumb";
+    t.title = c.title;
+    t.innerHTML = "<i></i><i></i><i></i>";
+    t.addEventListener("click", () => restore(c));
+    thumbs.appendChild(t);
+  });
+
+  requestAnimationFrame(updateScrollbar);
+}
+
+/* ------------------------------------------------ 完成：飞向迷你卡 */
+function complete(el, card){
+  const from = el.getBoundingClientRect();
+  const ghost = document.createElement("div");
+  ghost.className = "flying";
+  ghost.style.left = from.left + "px";
+  ghost.style.top = from.top + "px";
+  ghost.style.width = from.width + "px";
+  ghost.style.height = from.height + "px";
+  document.body.appendChild(ghost);
+
+  done.push(card);
+  render();
+
+  // 目标位置：右上角迷你卡的第一个位置
+  const panelRect = panel.getBoundingClientRect();
+  const scale = panelRect.width / 482;
+  const tw = 34 * scale, th = 22 * scale;
+  const tx = panelRect.right - (66 + 34) * scale;
+  const ty = panelRect.top + 57 * scale;
+
+  requestAnimationFrame(() => {
+    ghost.style.left = tx + "px";
+    ghost.style.top = ty + "px";
+    ghost.style.width = tw + "px";
+    ghost.style.height = th + "px";
+    ghost.style.opacity = "0.25";
+  });
+  setTimeout(() => ghost.remove(), 340);
+}
+
+function restore(card){
+  const i = done.indexOf(card);
+  if (i >= 0) done.splice(i, 1);
+  render();
+}
+
+/* ------------------------------------------------ 滚动条 */
+function updateScrollbar(){
+  const canScroll = list.scrollHeight > list.clientHeight + 2;
+  if (!canScroll){ sbar.classList.remove("on"); return; }
+  sbar.classList.add("on");
+  const ratio = list.clientHeight / list.scrollHeight;
+  const h = Math.max(26, list.clientHeight * ratio);
+  sbar.style.height = h + "px";
+  sbar.style.top = (list.scrollTop / (list.scrollHeight - list.clientHeight) *
+                    (list.clientHeight - h) + 4) + "px";
+}
+list.addEventListener("scroll", updateScrollbar);
+
+/* ------------------------------------------------ 收起 / 展开 */
+$("collapse").addEventListener("click", () => {
+  if (collapsed) return;
+  collapsed = true;
+  panel.style.transform = "scale(.14)";
+  panel.style.opacity = "0";
+  setTimeout(() => {
+    ball.classList.add("on");
+  }, 120);
+  setTimeout(() => {
+    panel.style.visibility = "hidden";
+  }, 280);
+});
+
+ball.addEventListener("click", () => {
+  if (!collapsed) return;
+  collapsed = false;
+  panel.style.visibility = "visible";
+  requestAnimationFrame(() => {
+    ball.classList.remove("on");
+    panel.style.transform = "scale(1)";
+    panel.style.opacity = "1";
+  });
+});
+
+/* ------------------------------------------------ 背景切换 */
+document.addEventListener("keydown", (e) => {
+  const i = ["1","2","3"].indexOf(e.key);
+  if (i >= 0) $("desk").dataset.bg = BG[i];
+  if (e.key === "h" || e.key === "H") $("hint").classList.toggle("hide");
+});
+
+/* ------------------------------------------------ 自适应缩放 */
+function fit(){
+  const pad = 56;
+  const s = Math.min(1, (innerHeight - pad) / 780, (innerWidth - pad) / 482);
+  stage.style.transform = `scale(${s})`;
+}
+addEventListener("resize", fit);
+
+/* ------------------------------------------------ 启动 */
+/* URL 预设：?done=2 预置两条已完成，?ball=1 直接收起成球 */
+const qs = new URLSearchParams(location.search);
+const presetBg = qs.get("bg");
+if (presetBg && BG.includes(presetBg)) $("desk").dataset.bg = presetBg;
+const presetDone = Math.max(0, Math.min(6, parseInt(qs.get("done") || "0", 10) || 0));
+if (presetDone) done = CARDS.slice(0, presetDone);
+
+render();
+fit();
+
+if (qs.get("ball") === "1") {
+  collapsed = true;
+  panel.style.transition = "none";
+  panel.style.transform = "scale(.14)";
+  panel.style.opacity = "0";
+  panel.style.visibility = "hidden";
+  ball.classList.add("on");
+  requestAnimationFrame(() => { panel.style.transition = ""; });
+}
+setTimeout(() => { const d = new Date(); $("stamp").textContent =
+  "更新于 " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }, 0);
+</script>
+</body>
+</html>

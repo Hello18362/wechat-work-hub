@@ -4,9 +4,24 @@
 
     python tests/test_server.py                          # 默认 127.0.0.1:5710
     WGH_URL=http://127.0.0.1:5800 python tests/test_server.py
+
+注意：这是**手动集成脚本**，不是单元测试——它要连一个真正跑着的服务。
+文件名叫 test_ 开头会被 pytest 收集，所以下面加了收集期跳过，
+否则 `pytest tests` 会直接崩在 sys.exit() 上。
 """
 
 from __future__ import annotations
+
+if __name__ != "__main__":
+    try:
+        import pytest
+    except ImportError:  # 没装 pytest 时（例如只跑 unittest）保持原样
+        pass
+    else:
+        pytest.skip(
+            "集成脚本，需要先启动服务：python main.py --serve 后执行 python tests/test_server.py",
+            allow_module_level=True,
+        )
 
 import http.client
 import json

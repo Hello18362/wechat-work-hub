@@ -11,7 +11,7 @@ import os
 
 # ---------------------------------------------------------------- 尺寸
 
-PANEL_W = 540
+PANEL_W = 482
 PANEL_H = 780
 PANEL_RADIUS = 24
 PANEL_MARGIN = 20          # 留白给投影
@@ -19,66 +19,92 @@ PANEL_MARGIN = 20          # 留白给投影
 BALL = 68                  # 收起态直径
 BALL_MARGIN = 14
 
-SLIVER_W = 6               # 贴边隐藏后的细条宽度
+SLIVER_W = 10              # 贴边隐藏后的细条宽度（6px 在黑壁纸上等于消失，加到 10）
 SLIVER_H = 168
 SLIVER_MARGIN = 12
 
-PAD_X = 26                 # 面板左右内边距
+PAD_X = 26                 # 面板左右内边距（卡片宽度 = 540-2*PAD_X）
 HEADER_H = 96
 CARDS_TOP = 112
 CARDS_BOTTOM = 710
 CARD_GAP = 12
 CARD_RADIUS = 18
 CARD_PAD = 16
-MAX_CARDS = 6
+MAX_CARDS = 60             # 卡片不设上限，超出可视区就滚动
+MAX_DONE = 2
+CARD_MIN_H = 78
+SCROLL_STEP = 96           # 滚一格滚多少像素
+SCROLL_EASE = 0.30         # 滚动跟随系数（越大越跟手）
+SCROLL_FADE = 14           # 卡片区上下的渐隐高度
+
+# 已完成任务的迷你卡（收到头部右侧，Mac 坞那种缩略图）
+THUMB_W = 34
+THUMB_H = 22
+THUMB_GAP = 6
+THUMB_MAX = 6
+CHECK_R = 9                # 卡片左侧完成按钮半径
 
 # ---------------------------------------------------------------- 手感参数
 
 SNAP_DIST = 24             # 拖到边缘多少像素内吸附
-ANIM_MS = 260              # 收起/展开动画时长（项目统一 200–420ms）
-HIDE_DELAY_MS = 1500       # 无操作多久缩成细条
+ANIM_MS = 200              # 收起/展开动画时长（项目统一 200–420ms，取最快档）
+HIDE_DELAY_MS = 8000       # 鼠标离开多久缩成细条（1.5s 太短，人一走神卡片就没了）
 SLIVER_HOVER_PAD = 12      # 光标距细条多少像素触发展开
 POLL_MS = 100              # 光标轮询间隔
-FRAME_MS = 16              # 动画帧间隔（约 60fps）
+FRAME_MS = 8               # 动画帧间隔：WM_TIMER 会被系统合并，8ms 才够 60fps
 DATA_POLL_MS = 3000        # cards.json 检查间隔
 BACKDROP_MS = 1500         # 磨砂背景重新取景间隔
 
 # ---------------------------------------------------------------- 颜色
 
-TINT = (16, 16, 18, 168)          # 玻璃暗色底，保证白字可读
-TINT_DRAG = (16, 16, 18, 236)     # 拖动时的实底（关掉磨砂）
-BORDER = (255, 255, 255, 46)
-BORDER_TOP = (255, 255, 255, 92)  # 顶部亮边，模拟玻璃棱
-SHADOW = (0, 0, 0, 96)
+TINT = (16, 16, 18, 168)          # 抓不到屏时的兜底底色
+TINT_DRAG = (16, 16, 18, 232)     # 拖动时的实底（关掉磨砂）
+BORDER = (255, 255, 255, 26)
+BORDER_TOP = (255, 255, 255, 40)  # 顶部亮边，模拟玻璃棱
+SHADOW = (0, 0, 0, 14)            # 光晕几乎去掉，只留一点边
+
+# 压暗强度随背景亮度自适应：暗桌面更透，亮背景自动加深保证白字可读
+TINT_ALPHA_MIN = 120              # 背景很暗时（最透）
+TINT_ALPHA_MAX = 192              # 背景很亮时（最实）
 
 INK = (243, 242, 240, 255)
-INK_2 = (166, 164, 161, 255)
-INK_3 = (114, 112, 109, 255)
+INK_2 = (180, 178, 175, 255)
+INK_3 = (150, 148, 145, 255)
 INK_DONE = (108, 106, 104, 255)
 
 ACCENT = (255, 92, 40, 255)
-ACCENT_DIM = (255, 92, 40, 210)
+ACCENT_DIM = (255, 92, 40, 196)
 WARN = (255, 176, 76, 255)
 
-CARD_FILL = (255, 255, 255, 16)
-CARD_FILL_HOVER = (255, 255, 255, 26)
-CARD_BORDER = (255, 255, 255, 22)
-CARD_BORDER_HOVER = (255, 255, 255, 46)
+CARD_FILL = (255, 255, 255, 22)
+CARD_FILL_HOVER = (255, 255, 255, 34)
+CARD_BORDER = (255, 255, 255, 34)
+CARD_BORDER_HOVER = (255, 255, 255, 52)
 DIVIDER = (255, 255, 255, 20)
 
 PRIORITY = {
-    "紧急": ((255, 92, 40, 34), (255, 92, 40, 255)),
-    "高": ((255, 92, 40, 34), (255, 92, 40, 255)),
-    "重要": ((255, 176, 76, 30), (255, 176, 76, 255)),
-    "中": ((140, 170, 255, 26), (150, 178, 255, 255)),
-    "常规": ((255, 255, 255, 14), (150, 148, 146, 255)),
+    # (底色, 字色)：字色比底色亮一档，暗底上才看得清
+    "紧急": ((255, 92, 40, 40), (255, 156, 122, 255)),
+    "高": ((255, 92, 40, 40), (255, 156, 122, 255)),
+    "重要": ((255, 176, 76, 34), (255, 202, 134, 255)),
+    "中": ((140, 170, 255, 30), (168, 192, 255, 255)),
+    "常规": ((255, 255, 255, 16), (176, 174, 172, 255)),
 }
 
 # ---------------------------------------------------------------- 字体
 
+# 字体候选：按顺序取第一个存在的文件。
+# Windows 微软雅黑 → macOS 苹方 → Linux Noto / 文泉驿。
+# 不加这条链的话，系统没有雅黑时会掉到 PIL 的位图默认字体，中文全变方块。
 _BOLD = [r"C:\Windows\Fonts\msyhbd.ttc", r"C:\Windows\Fonts\msyh.ttc",
-         r"C:\Windows\Fonts\simhei.ttf"]
-_REG = [r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\simhei.ttf"]
+         r"C:\Windows\Fonts\simhei.ttf",
+         "/System/Library/Fonts/PingFang.ttc",
+         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"]
+_REG = [r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\simhei.ttf",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"]
 
 _font_cache: dict = {}
 
@@ -109,6 +135,29 @@ def font(size: int, bold: bool = False):
 def ease_out_cubic(t: float) -> float:
     t = min(1.0, max(0.0, t))
     return 1.0 - (1.0 - t) ** 3
+
+
+def spring(t: float) -> float:
+    """项目统一手感曲线 cubic-bezier(.22,1.2,.36,1)，带一点点回弹。
+
+    CSS 里的贝塞尔要先解 x(t)=x 再取 y(t)，这里用二分，12 次足够精确，
+    每帧只调一次，成本可以忽略。
+    """
+    t = min(1.0, max(0.0, t))
+    if t <= 0.0:
+        return 0.0
+    if t >= 1.0:
+        return 1.0
+    lo, hi = 0.0, 1.0
+    for _ in range(12):
+        mid = (lo + hi) / 2
+        x = 3 * (1 - mid) ** 2 * mid * 0.22 + 3 * (1 - mid) * mid * mid * 0.36 + mid ** 3
+        if x < t:
+            lo = mid
+        else:
+            hi = mid
+    m = (lo + hi) / 2
+    return 3 * (1 - m) ** 2 * m * 1.2 + 3 * (1 - m) * m * m * 1.0 + m ** 3
 
 
 def ease_in_out(t: float) -> float:

@@ -51,10 +51,16 @@ FONT_CANDIDATES = [
     r"C:\Windows\Fonts\msyhbd.ttc",   # 微软雅黑 Bold
     r"C:\Windows\Fonts\msyh.ttc",     # 微软雅黑
     r"C:\Windows\Fonts\simhei.ttf",   # 黑体
+    "/System/Library/Fonts/PingFang.ttc",                              # macOS
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",             # Linux
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
 ]
 FONT_REG_CANDIDATES = [
     r"C:\Windows\Fonts\msyh.ttc",
     r"C:\Windows\Fonts\simhei.ttf",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
 ]
 
 

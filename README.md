@@ -9,6 +9,8 @@
 `本地优先` `微信群聊` `多模态` `大模型` `DeepSeek` `OpenAI 兼容` `Windows`
 
 > 不想装环境也能先看效果：双击 `demo-site/预览.bat`，打开一个纯静态演示站（示例数据，不需要微信、不需要 API Key）。
+>
+> 要发微信 / 用手机看：双击 `demo-site/打包单文件.bat`，生成 `demo-site/dist/WeChatWorkHub-演示-单文件.html`（约 250 KB，CSS/JS/示例报告全内联，微信发过去点开就能用）。
 
 ---
 
@@ -74,10 +76,10 @@ Markdown + HTML 报告（runs/，本机）
 ## 五、快速开始
 
 ```bash
-git clone https://github.com/<your-name>/wechat-work-hub.git
+git clone https://github.com/Hello18362/wechat-work-hub.git
 cd wechat-work-hub
 
-# 1) 安装依赖（核心只有三个包）
+# 1) 安装依赖（核心四个包：requests / PyYAML / beautifulsoup4 / Pillow）
 pip install -e .
 
 # 2) 配置群与负责人
@@ -136,7 +138,88 @@ runs/
 
 ---
 
-## 六、模型配置（重点）
+## 六、桌面悬浮窗（可选，仅 Windows）
+
+把「今日待办」做成桌面上的一块玻璃小窗：贴边吸附、可收起成球、卡片可以点掉。
+**这是 Windows 独占功能**——macOS / Linux 上采集、报告、控制台都能用，只有这块不行。
+
+### 启动
+
+```bash
+python tools/desktop_widget.py            # 有控制台，能看到日志
+python tools/desktop_widget.py --demo     # 还没生成过卡片时，用示例数据看效果
+```
+
+Windows 也可以直接双击项目根目录的 `启动悬浮窗.bat`（会同时拉起数据守护进程）。
+窗口卡住/不见了双击 `重启悬浮窗.bat`（先关旧的再拉新的）。
+
+#### 这个窗口不会自己消失
+
+- **不会因为鼠标移开而自动收起**（以前会，害得人天天找卡片）。想收起请点面板右上角的「∨」。
+- **崩溃或被结束会自动回来**：数据守护进程每 60 秒看一眼窗口在不在，不在就拉起来。
+  崩溃栈会写到 `%LOCALAPPDATA%\WeChatWorkHub\crash.log`。
+- **开机自启**：注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下有两项
+  `WeChatWorkHubDaemon` / `WeChatWorkHubWidget`，登录即起。
+- **bat 只认装了依赖的 Python**：`tools\找Python.bat` 会逐个候选执行
+  `import PIL,requests,yaml,bs4`，不合格就换下一个。以前只看 `python -V`，
+  抓到 WorkBuddy 自带的 3.13（没有 Pillow）就会「窗口一闪就没了」。
+
+### 三个形态
+
+| 形态 | 尺寸 | 怎么进入 |
+| --- | --- | --- |
+| 展开 | 482 × 780 | 启动默认形态；点玻璃球也能回来 |
+| 玻璃球 | 68 × 68 | 点面板右上角的「∨」 |
+| 贴边细条 | 10 × 168 | 仅 `--mode sliver` 快照用，日常不再自动进入 |
+
+### 先有数据才好看
+
+卡片来自 `%LOCALAPPDATA%\WeChatWorkHub\cards.json`，它由下面任一步生成：
+
+```bash
+python tools/make_daily_cards.py     # 只重算卡片（免费，不调模型）
+python tools/daily_job.py            # 刷新数据 + 出报告 + 写卡片（会调模型）
+```
+
+没有这个文件时会自动回落到示例数据，但**建议先跑一次真实数据**，否则看到的不是你的任务。
+
+### 依赖与限制（重要）
+
+| 项 | 说明 |
+| --- | --- |
+| **Pillow** | 必需，`pip install -e .` 已经包含 |
+| **仅 Windows 10 / 11** | 依赖 Win32 分层窗口 + GDI 抓屏 + DWM，其他系统会直接提示不支持 |
+| **DPI 缩放** | 100% 已验证；**125% / 150% 未做真机验证**，若出现错位请反馈 |
+| **Win11** | 代码保留了 Acrylic 分支，但**未在 Win11 实测** |
+| **背景是快照** | 玻璃背后是抓屏后模糊的图，不是实时渲染。盖在正在播放的视频上会露馅，这时把它收成球即可 |
+| **对壁纸敏感** | 深色壁纸效果最好；纯白背景下面板会自动压深，否则白字看不清 |
+
+### 开机自启（可选）
+
+把下面内容的 `.bat` 放进启动文件夹：
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`
+
+```bat
+@echo off
+cd /d "你的项目路径"
+start "" pythonw.exe "tools\auto_daemon.py"
+start "" pythonw.exe "tools\desktop_widget.py"
+```
+
+`auto_daemon.py` 是数据守护：每 10 分钟查一次微信有没有新消息，有就自动出报告、更新卡片。
+**查询本身不花钱**，只有真的生成报告才调模型。
+
+### 遇到问题先自检
+
+```bash
+python tools/doctor.py
+```
+
+会逐项检查依赖、配置、数据源、字体、平台支持，并告诉你缺什么。
+
+---
+
+## 七、模型配置（重点）
 
 ### 6.1 你的 Key 不会跟着仓库走
 
@@ -227,7 +310,7 @@ vision:
 
 ---
 
-## 七、使用方式
+## 八、使用方式
 
 ### 本地控制台
 
@@ -264,7 +347,7 @@ python app.py        # 用 PyWebView 打开原生窗口，缺依赖时降级为�
 
 ---
 
-## 八、配置说明
+## 九、配置说明
 
 ### `config/groups.yaml`
 
@@ -300,7 +383,7 @@ global_leaders:           # 跨群统一关注的人
 
 ---
 
-## 九、目录结构
+## 十、目录结构
 
 ```
 wechat-work-hub/
@@ -325,7 +408,7 @@ wechat-work-hub/
 
 ---
 
-## 十、容错设计
+## 十一、容错设计
 
 「任何单条消息处理失败都不应中断整批任务」是硬约束：
 
@@ -345,7 +428,7 @@ wechat-work-hub/
 
 ---
 
-## 十一、测试
+## 十二、测试
 
 ```bash
 # 回归测试，纯标准库，不需要 pytest
@@ -362,7 +445,7 @@ python tests/test_server.py
 
 ---
 
-## 十二、常见问题
+## 十三、常见问题
 
 **Q：跑出来是空的 / 提示找不到数据库？**
 先确认三件事：微信 PC 版已登录、解密工具已成功执行、`.env` 的 `WX_DECRYPTED_DIR` 指向的目录里确实有 `*.db` 文件。
@@ -384,7 +467,7 @@ python tests/test_server.py
 
 ---
 
-## 十三、许可与免责
+## 十四、许可与免责
 
 **使用前请阅读 [DISCLAIMER.md](DISCLAIMER.md)。** 简要说明：
 

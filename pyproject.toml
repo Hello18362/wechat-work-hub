@@ -12,11 +12,13 @@ requires-python = ">=3.10"
 license = { text = "PolyForm Noncommercial License 1.0.0" }
 authors = [{ name = "Hello18362" }]
 
-# 最小核心依赖：只保留跑通链路必需的三件套。
+# 核心依赖。Pillow 是桌面卡片渲染（tools/widget/*、tools/desktop_cards.py）必需的，
+# 缺了它悬浮窗会在 import 阶段直接 ModuleNotFoundError，所以放核心而不是可选。
 dependencies = [
     "requests>=2.31.0",
     "PyYAML>=6.0.1",
     "beautifulsoup4>=4.12.0",
+    "Pillow>=10.0.0",
 ]
 
 # 可选依赖按需安装，避免 MVP 阶段环境过重。

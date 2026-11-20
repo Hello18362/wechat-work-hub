@@ -136,7 +136,13 @@ class DoubaoSummarizer(Summarizer):
             self.last_meta["error"] = "empty_response"
             return self._error_block("模型返回了空内容。")
 
-        logger.info("在线总结完成（%d 字）", len(content))
+        # 把 token 用量写进日志，方便算钱（输入按 $0.15~0.30/百万、输出 $0.60~1.20/百万）
+        logger.info(
+            "在线总结完成（%d 字，输入 %s / 输出 %s tokens）",
+            len(content),
+            usage.get("prompt_tokens", "?"),
+            usage.get("completion_tokens", "?"),
+        )
         return content
 
     @staticmethod

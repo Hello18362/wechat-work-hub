@@ -53,3 +53,16 @@
 #demoReportOverlay .demo-ov-frame{
   flex:1;width:100%;border:0;background:#fafafa;
 }
+
+
+/* ---- 导航里的「桌面悬浮窗」入口 ---- */
+.nav-widget{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:8px 14px;border-radius:999px;
+  font-size:13px;font-weight:500;text-decoration:none;
+  color:#1a1a1a;background:#f1f0ed;border:1px solid rgba(0,0,0,.09);
+  transition:background .18s ease,border-color .18s ease;
+  white-space:nowrap;
+}
+.nav-widget:hover{background:#e7e5e1;border-color:rgba(0,0,0,.16)}
+.nav-widget .wd{width:7px;height:7px;border-radius:4px;background:#ff5c28;flex:none}
