@@ -1,0 +1,78 @@
+{
+  "group": "XX项目工作群",
+  "member_count": 8,
+  "messages": [
+    {
+      "time": "2026-10-26 09:12",
+      "sender": "张总",
+      "id": "demo-leader-01",
+      "type": "text",
+      "content": "周一早会先定三件事：第一，小程序评审挪到明天下午三点，UI 稿必须提前出；第二，数据看板这周要能演示，不能继续拖；第三，客户周六来参观，演示环境落实到人。",
+      "leader": true,
+      "seq": 1
+    },
+    {
+      "time": "2026-10-26 09:14",
+      "sender": "李工",
+      "id": "demo-dev-01",
+      "type": "text",
+      "content": "收到。UI 稿我今天下班前先给一版初稿，评审前再修一轮。",
+      "leader": false,
+      "seq": 2
+    },
+    {
+      "time": "2026-10-26 09:15",
+      "sender": "王工",
+      "id": "demo-dev-02",
+      "type": "text",
+      "content": "看板的数据口径我再和运营对一下，下午两点前出结果。演示环境我用大屏那台机器搭。",
+      "leader": false,
+      "seq": 3
+    },
+    {
+      "time": "2026-10-26 16:40",
+      "sender": "李工",
+      "id": "demo-dev-01",
+      "type": "text",
+      "content": "UI 初稿放到共享盘了，名字是 review-v1，大家有空看下评论区。",
+      "leader": false,
+      "seq": 4
+    },
+    {
+      "time": "2026-10-27 10:02",
+      "sender": "陈总",
+      "id": "demo-leader-02",
+      "type": "text",
+      "content": "昨天定的三件事，负责人各报一下进度。另外客户周六参观改到下午两点，上午抓紧彩排一遍。",
+      "leader": true,
+      "seq": 1
+    },
+    {
+      "time": "2026-10-27 10:05",
+      "sender": "王工",
+      "id": "demo-dev-02",
+      "type": "text",
+      "content": "看板数据口径已确认：活跃用户按近 7 天有操作算。演示页今晚能出。",
+      "leader": false,
+      "seq": 2
+    },
+    {
+      "time": "2026-10-27 10:06",
+      "sender": "李工",
+      "id": "demo-dev-01",
+      "type": "text",
+      "content": "UI 评审稿今天中午前更新到终版，下午三点评审会我投屏。",
+      "leader": false,
+      "seq": 3
+    },
+    {
+      "time": "2026-10-27 10:08",
+      "sender": "赵同学",
+      "id": "demo-dev-03",
+      "type": "text",
+      "content": "演示环境我来搭，周六彩排我人在场。",
+      "leader": false,
+      "seq": 4
+    }
+  ]
+}

@@ -66,7 +66,7 @@ Markdown + HTML 报告（runs/，本机）
 | 操作系统 | Windows 10 / 11 | 微信 PC 版仅 Windows 可解密读取 |
 | 微信 | PC 版 4.x，保持登录 | 建议固定版本，微信升级可能影响数据库结构 |
 | Python | 3.10+（推荐 3.11） | |
-| 数据库解密工具 | 自备 | 本项目使用 [stories-in-wx] 风格的工具，能输出解密后的 SQLite 目录即可 |
+| 数据库解密工具 | 选配 | 本项目使用 [stories-in-wx] 风格的工具，能输出解密后的 SQLite 目录即可；不配也能先用内置样例数据演示完整链路 |
 | 大模型 API Key | 可选 | 不配也能跑，自动降级为离线模式 |
 | ffmpeg | 可选 | 语音为 SILK 格式时用于转码 |
 | faster-whisper | 可选 | 不装则语音降级为 `[语音]` 占位 |
@@ -79,7 +79,7 @@ Markdown + HTML 报告（runs/，本机）
 git clone https://github.com/Hello18362/wechat-work-hub.git
 cd wechat-work-hub
 
-# 1) 安装依赖（核心四个包：requests / PyYAML / beautifulsoup4 / Pillow）
+# 1) 安装依赖（核心包：requests / PyYAML / beautifulsoup4 / Pillow / zstandard）
 pip install -e .
 
 # 2) 配置群与负责人
@@ -95,6 +95,26 @@ python main.py --group "XX项目工作群" -f both --open
 ```
 
 Windows 用户也可以直接双击 `一键启动.bat` 拉起本地控制台。
+
+### 全新安装、还没配数据源？先用内置样例数据
+
+只做完第 1 步（`pip install -e .`）也可以完整跑通「采集 → 多模态加工 → 合并 →
+总结 → 报告」全链路：没配置解密目录、本地也没有 chatlog 服务时，程序会自动兜底到
+仓库自带的**虚构样例数据**（`data/samples/*.json`），控制台状态栏会明确显示
+「内置样例数据（未配置真实数据源）」。
+
+```bash
+# 看看内置样例群
+python main.py --list-groups
+
+# 用样例数据出一份演示报告（无需任何 Key，总结自动离线降级）
+python main.py --group "XX项目工作群" --date 2026-10-27 -f both --open
+```
+
+样例数据里有两个群：`XX项目工作群`（2026-10-26 / 10-27）和 `部门周会群`
+（2026-10-27），全部是虚构的演示内容。配置好真实数据源（`.env` 里的
+`WX_DECRYPTED_DIR`）后会自动切回，无需手动开关；想关闭这个兜底，把
+`config/settings.yaml` 里 `chatlog.fallback_sample` 改为 `false`。
 
 ### 刷新解密数据
 

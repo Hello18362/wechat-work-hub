@@ -34,6 +34,9 @@ from collector.models import (
     TYPE_VOICE,
     Message,
 )
+from core.log import get_logger
+
+logger = get_logger("sqlite_client")
 
 _TYPE_MAP = {
     1: TYPE_TEXT,
@@ -64,6 +67,10 @@ def _decode_content(content: Any) -> str:
             import zstandard as _zstd
 
             raw = _zstd.ZstdDecompressor().decompressobj().decompress(raw)
+        except ImportError:
+            # zstandard 是核心依赖，装缺了等于这部分消息全丢 —— 必须出声
+            logger.warning("未安装 zstandard，WCDB 压缩内容无法解压（消息可能缺失）；请重装：pip install -e .")
+            return ""
         except Exception:
             return ""
     try:
@@ -74,6 +81,8 @@ def _decode_content(content: Any) -> str:
 
 class SqliteClient:
     """解密 SQLite 直读客户端，接口与 ChatlogClient 对齐。"""
+
+    source_mode = "sqlite"
 
     def __init__(self, decrypted_dir: str | Path) -> None:
         """Args: decrypted_dir — SIWX 解密输出目录（含 message/ contact/ 子目录）。"""

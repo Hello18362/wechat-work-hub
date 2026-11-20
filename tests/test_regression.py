@@ -119,7 +119,9 @@ class TestConfigIsolation(unittest.TestCase):
 
     def _make_config(self) -> dict:
         return {
-            "chatlog": {"api_base": "http://127.0.0.1:5030"},
+            # fallback_sample=False：本组测试要守住「连不上数据源必须报错」的
+            # 旧语义，不触发内置样例兜底（样例兜底有专门的 test_sample_client 覆盖）。
+            "chatlog": {"api_base": "http://127.0.0.1:5030", "fallback_sample": False},
             "summarizer": {"provider": "file_output", "prompt_template": "leader_brief"},
             "output": {"dir": "./runs", "format": ["markdown"]},
         }

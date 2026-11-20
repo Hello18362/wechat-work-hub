@@ -12,6 +12,10 @@ chatlog:
   # SIWX 解密输出目录。这是本机绝对路径，属于隐私，不写进仓库；
   # 请在项目根目录的 .env 里配置：WX_DECRYPTED_DIR=你的解密目录
   decrypted_dir: ""
+  # 未配置 decrypted_dir 且 chatlog HTTP 服务不可用时，是否用仓库自带的
+  # 内置样例数据（data/samples/*.json）兜底，保证刚装好的机器也能演示全链路。
+  # 设 false 关闭；配置了解密目录（哪怕目录失效）时此开关不生效。
+  fallback_sample: true
   # 单次请求超时秒数
   timeout: 15
   # 分页拉取时每页条数

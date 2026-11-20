@@ -1445,7 +1445,15 @@
     return api('/api/status').then(function (data) {
       var el = $('#status');
       el.setAttribute('data-state', data.chatlog_online ? 'online' : 'offline');
-      $('.status-text', el).textContent = data.chatlog_online ? 'chatlog 已连接' : 'chatlog 未启动';
+      // 未配置真实数据源时服务端会兜底到内置样例数据，状态文案要如实告知，
+      // 否则用户会误以为连上的是自己的微信记录。
+      if (data.chatlog_online && data.source_mode === 'sample') {
+        $('.status-text', el).textContent = '内置样例数据（未配置真实数据源）';
+        el.setAttribute('title', '当前是仓库自带样例。可在群组里选“XX项目工作群”、日期选 2026-10-27 体验完整链路；配置好真实数据源后会自动切换。');
+      } else {
+        $('.status-text', el).textContent = data.chatlog_online ? 'chatlog 已连接' : 'chatlog 未启动';
+        el.removeAttribute('title');
+      }
       state.templates = data.templates || [];
       renderTemplateList();
       $('#footPath').textContent = '输出目录 ' + (data.version ? 'runs/' : '');

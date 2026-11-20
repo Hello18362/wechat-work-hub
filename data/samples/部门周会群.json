@@ -1,0 +1,24 @@
+{
+  "group": "部门周会群",
+  "member_count": 12,
+  "messages": [
+    {
+      "time": "2026-10-27 14:30",
+      "sender": "张总",
+      "id": "demo-leader-01",
+      "type": "text",
+      "content": "本周周会改到周四下午四点。各小组把季度复盘发到共享文档，每人三句话：做了什么、卡在哪、需要什么支持。",
+      "leader": true,
+      "seq": 1
+    },
+    {
+      "time": "2026-10-27 14:32",
+      "sender": "刘主管",
+      "id": "demo-dev-04",
+      "type": "text",
+      "content": "我们组今天下班前交。新人培训手册还需要市场部那边提供素材。",
+      "leader": false,
+      "seq": 2
+    }
+  ]
+}

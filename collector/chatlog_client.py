@@ -192,6 +192,8 @@ class ChatlogClient:
     #: 健康检查专用超时，远短于业务请求超时（详见 `health`）
     _HEALTH_TIMEOUT = 2.5
 
+    source_mode = "chatlog"
+
     def __init__(
         self,
         api_base: str = "http://127.0.0.1:5030",
@@ -618,7 +620,11 @@ def build_client_from_config(cfg: Dict[str, Any]):
 
     优先级：settings.yaml 里 `chatlog.decrypted_dir` 存在且指向有效的
     SIWX 解密目录时，使用 SQLite 直读后端（SqliteClient）；否则回落到
-    chatlog HTTP 服务。
+    chatlog HTTP 服务；两者都不可用且未配置解密目录时，最后兜底到
+    内置样例数据（SampleClient），保证干净安装的机器也能跑通全链路。
+
+    `chatlog.fallback_sample: false` 可关掉样例兜底；一旦配置了解密目录
+    （哪怕目录损坏），都不会兜底 —— 这时必须把真实错误暴露给用户。
     """
     from collector.sqlite_client import build_sqlite_client_from_config
 
@@ -626,15 +632,37 @@ def build_client_from_config(cfg: Dict[str, Any]):
     if sqlite_client is not None and sqlite_client.health():
         return sqlite_client
 
+    chatlog_cfg: Dict[str, Any] = (cfg.get("chatlog", {}) or {})
     endpoints = dict(ChatlogClient._default_endpoints())
-    endpoints.update((cfg.get("chatlog", {}) or {}).get("endpoints", {}) or {})
-    return ChatlogClient(
-        api_base=(cfg.get("chatlog", {}) or {}).get("api_base", "http://127.0.0.1:5030"),
-        timeout=int((cfg.get("chatlog", {}) or {}).get("timeout", 15)),
-        page_size=int((cfg.get("chatlog", {}) or {}).get("page_size", 500)),
-        max_pages=int((cfg.get("chatlog", {}) or {}).get("max_pages", 20)),
+    endpoints.update(chatlog_cfg.get("endpoints", {}) or {})
+    client = ChatlogClient(
+        api_base=chatlog_cfg.get("api_base", "http://127.0.0.1:5030"),
+        timeout=int(chatlog_cfg.get("timeout", 15)),
+        page_size=int(chatlog_cfg.get("page_size", 500)),
+        max_pages=int(chatlog_cfg.get("max_pages", 20)),
         endpoints=endpoints,
     )
+
+    # 兜底：未配置解密目录、HTTP 服务也不可用时，给演示用的内置样例数据。
+    # 配置了解密目录但失效（sqlite_client 非 None 而 health 为 False）不兜底。
+    if (
+        sqlite_client is None
+        and not (chatlog_cfg.get("decrypted_dir") or "").strip()
+        and chatlog_cfg.get("fallback_sample", True) is not False
+        and not client.health()
+    ):
+        from collector.sample_client import SampleClient
+
+        sample = SampleClient()
+        if sample.health():
+            logger.warning(
+                "未配置真实数据源（decrypted_dir 为空且 %s 不可用），"
+                "已回退到内置样例数据；配置好数据源后会自动切回。",
+                client.api_base,
+            )
+            return sample
+
+    return client
 
 
 def ffmpeg_available() -> bool:
