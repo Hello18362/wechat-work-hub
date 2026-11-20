@@ -118,7 +118,7 @@ class SliverHoverTest(unittest.TestCase):
     RECT = (1900, 400, 68, 384)   # 贴在 1920 宽的屏幕右侧
 
     def _hit(self, cx, cy, pad=24):
-        from tools.widget.app import hover_pad_hit
+        from tools.widget.geom import hover_pad_hit
         return hover_pad_hit(self.RECT, cx, cy, pad)
 
     def test_inside_bar(self):

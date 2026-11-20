@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from PIL import Image, ImageChops, ImageFilter
 
 from . import render, theme as T, win32
+from .geom import hover_pad_hit
 from .store import CardStore, DoneStore, WidgetState, card_key
 
 TID_FRAME = 1
@@ -50,12 +51,6 @@ def _dbg(*parts) -> None:
             fh.write(time.strftime("%H:%M:%S ") + " ".join(str(p) for p in parts) + "\n")
     except Exception:
         pass
-
-
-def hover_pad_hit(rect, cx: float, cy: float, pad: float) -> bool:
-    """光标是否落在矩形外扩 pad 的范围内（细条悬停判定，抽出来方便测试）。"""
-    x, y, w, h = rect
-    return (x - pad <= cx <= x + w + pad) and (y - pad <= cy <= y + h + pad)
 
 
 def _xy(lparam: int) -> Tuple[int, int]:
