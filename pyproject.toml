@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechat-work-hub"
-version = "0.1.0"
+version = "0.2.0"
 description = "本地优先的微信群聊多模态 AI 工作助手：采集、多模态处理、任务抽取"
 readme = "README.md"
 requires-python = ">=3.10"

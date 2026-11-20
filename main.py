@@ -63,7 +63,7 @@ def _reconfigure_console() -> None:
             pass
 
 
-def banner(version: str = "0.1.0") -> str:
+def banner(version: str = "0.2.0") -> str:
     """返回启动横幅。"""
     return f"""{CYAN}
   ┌─────────────────────────────────────────────────────────┐

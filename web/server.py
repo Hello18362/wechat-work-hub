@@ -46,7 +46,7 @@ from summarizer.doubao_api import test_connection
 
 logger = get_logger("web")
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 _STARTED_AT = time.time()  # 服务进程启动时刻，/health 用它报 uptime
 
 ASSETS_DIR = PROJECT_ROOT / "web" / "assets"
