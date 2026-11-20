@@ -22,7 +22,8 @@ from typing import Dict, List, Optional, Tuple
 from PIL import Image, ImageChops, ImageFilter
 
 from . import render, theme as T, win32
-from .geom import hover_pad_hit
+from .geom import (clamp_to_work, hover_pad_hit, panel_pos_from_box, snap_x,
+                   visible_box)
 from .store import CardStore, DoneStore, WidgetState, card_key
 
 TID_FRAME = 1
@@ -139,6 +140,27 @@ class Widget:
     def _panel_size(self) -> Tuple[float, float]:
         return (T.PANEL_W * self.k, T.PANEL_H * self.k)
 
+    def _visible_box(self, rect=None) -> Tuple[float, float, float, float]:
+        """当前形态在屏幕上真正看得见的矩形（不含投影留白）。"""
+        return visible_box(self.mode, rect or self.win_rect, self.k)
+
+    def _ensure_on_screen(self) -> bool:
+        """可见矩形跑出工作区就夹回来；返回是否动过位置。
+
+        启动时和拖拽结束后都调一次——用户把窗口拖到屏幕外，或者旧版本
+        把位置存歪了，都能靠这里救回来，不用重装。
+        """
+        box = self._visible_box()
+        work = self._work()
+        x, y, w, h = clamp_to_work(box, work)
+        if (x, y) == (box[0], box[1]):
+            return False
+        self.panel_pos = panel_pos_from_box(self.mode, (x, y, w, h), self.k)
+        self.state.set(panel_x=int(self.panel_pos[0]), panel_y=int(self.panel_pos[1]))
+        self.state.save()
+        _dbg("rescue", "box", box, "->", (x, y, w, h), "panel", self.panel_pos)
+        return True
+
     def _work(self) -> Tuple[int, int, int, int]:
         px, py = self.panel_pos
         pw, ph = self._panel_size()
@@ -183,6 +205,8 @@ class Widget:
             self.panel_pos = (left if self.side == "left" else right - pw, py)
         rect = self._rect_for(self.mode)
         self.win_rect = rect
+        if self._ensure_on_screen():
+            self.win_rect = self._rect_for(self.mode)
 
     def _apply_rect(self, rect, paint: bool = True, img: Optional[Image.Image] = None) -> None:
         x, y, w, h = (int(round(v)) for v in rect)
@@ -551,26 +575,22 @@ class Widget:
                 self._ball_click_job = now
 
     def _finish_drag(self) -> None:
-        x, y, w, h = self.win_rect
-        k = self.k
-        left, top, right, bottom = win32.monitor_work_rect(int(x + w / 2), int(y + h / 2))
-        margin = T.PANEL_MARGIN * k if self.mode == "expanded" else T.BALL_MARGIN * k
-        px, py = x + margin, y + margin
-        pw, ph = (self._panel_size() if self.mode == "expanded" else (T.BALL * k,) * 2)
+        """松手：按「看得见的那块」吸边、夹进工作区，再换回 panel 坐标。
 
-        self.side = ""
-        snap = T.SNAP_DIST * k
-        if px - left <= snap:
-            self.side = "left"
-            px = left
-        elif right - (px + pw) <= snap:
-            self.side = "right"
-            px = right - pw
-        px = min(max(px, left), max(left, right - pw))
-        py = min(max(py, top), max(top, bottom - ph))
-        self.panel_pos = (px, py)
-        _dbg("drag end", "panel", (round(px), round(py)), "side", self.side, "mode", self.mode)
-        self.state.set(panel_x=int(px), panel_y=int(py), side=self.side)
+        旧实现按留白矩形 + 小球尺寸算，右吸边后小球会被推出屏幕 300 多像素，
+        这正是「缩成小球再拖一下就再也叫不出来」的原因。
+        """
+        k = self.k
+        x, y, w, h = self.win_rect
+        work = win32.monitor_work_rect(int(x + w / 2), int(y + h / 2))
+        box = self._visible_box()
+        sx, side = snap_x(box, work, T.SNAP_DIST * k)
+        box = clamp_to_work((sx, box[1], box[2], box[3]), work)
+        self.panel_pos = panel_pos_from_box(self.mode, box, k)
+        self.side = side
+        _dbg("drag end", "box", box, "panel", self.panel_pos, "side", side, "mode", self.mode)
+        self.state.set(panel_x=int(self.panel_pos[0]), panel_y=int(self.panel_pos[1]),
+                       side=side)
         self.state.save()
 
         target = self._rect_for(self.mode)

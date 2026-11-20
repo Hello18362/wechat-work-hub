@@ -133,5 +133,69 @@ class SliverHoverTest(unittest.TestCase):
         self.assertFalse(self._hit(1934, 100))       # 纵向不沾边
 
 
+class DragGeometryTest(unittest.TestCase):
+    """回归：小球拖到边缘后被推出屏幕（缩成小球再拖动就再也叫不出来）。"""
+
+    WORK = (0, 0, 1920, 1040)
+
+    def _ball_visible(self, panel_x, panel_y, k=1.0):
+        """模拟 _rect_for("ball")：由 panel 坐标算出小球在屏幕上的可见矩形。"""
+        from tools.widget.geom import visible_box
+        bx = panel_x + T.PANEL_W * k - T.BALL * k
+        rect = (bx - T.BALL_MARGIN * k, panel_y - T.BALL_MARGIN * k,
+                (T.BALL + 2 * T.BALL_MARGIN) * k, (T.BALL + 2 * T.BALL_MARGIN) * k)
+        return visible_box("ball", rect, k)
+
+    def test_ball_box_strips_shadow_margin(self):
+        from tools.widget.geom import visible_box
+        box = visible_box("ball", (100, 200, 96, 96), 1.0)
+        self.assertEqual(box, (100 + T.BALL_MARGIN, 200 + T.BALL_MARGIN,
+                               T.BALL, T.BALL))
+
+    def test_expanded_box_strips_shadow_margin(self):
+        from tools.widget.geom import visible_box
+        box = visible_box("expanded", (10, 20, 522, 820), 1.0)
+        self.assertEqual(box, (10 + T.PANEL_MARGIN, 20 + T.PANEL_MARGIN,
+                               T.PANEL_W, T.PANEL_H))
+
+    def test_ball_panel_pos_round_trip(self):
+        from tools.widget.geom import panel_pos_from_box
+        box = (1852, 155, T.BALL, T.BALL)
+        px, py = panel_pos_from_box("ball", box, 1.0)
+        self.assertEqual(px, 1852 - (T.PANEL_W - T.BALL))
+        self.assertEqual(py, 155)
+        self.assertEqual(self._ball_visible(px, py), box)
+
+    def test_dragged_ball_to_right_edge_stays_visible(self):
+        from tools.widget.geom import clamp_to_work, panel_pos_from_box, snap_x, visible_box
+        # 用户把小球拖到屏幕右下角
+        box = visible_box("ball", (1880, 900, 96, 96), 1.0)
+        x, side = snap_x(box, self.WORK, T.SNAP_DIST)
+        self.assertEqual(side, "right")
+        x, y, w, h = clamp_to_work((x, box[1], box[2], box[3]), self.WORK)
+        px, py = panel_pos_from_box("ball", (x, y, w, h), 1.0)
+        # 关键：换算回 panel 坐标后，小球必须仍然整块落在屏幕里
+        vx, vy, vw, vh = self._ball_visible(px, py)
+        self.assertGreaterEqual(vx, 0)
+        self.assertLessEqual(vx + vw, self.WORK[2])
+        self.assertGreaterEqual(vy, 0)
+        self.assertLessEqual(vy + vh, self.WORK[3])
+
+    def test_ball_dragged_far_offscreen_is_pulled_back(self):
+        from tools.widget.geom import clamp_to_work, panel_pos_from_box, visible_box
+        # 旧版本存下来的坏位置：panel_x=1852 时小球被推到 2266
+        bad = visible_box("ball", (2252, 155, 96, 96), 1.0)
+        self.assertGreater(bad[0], self.WORK[2])          # 确实在屏幕外
+        x, y, w, h = clamp_to_work(bad, self.WORK)
+        px, py = panel_pos_from_box("ball", (x, y, w, h), 1.0)
+        vx, _vy, vw, _vh = self._ball_visible(px, py)
+        self.assertLessEqual(vx + vw, self.WORK[2])
+
+    def test_clamp_keeps_top_left_when_box_larger_than_work(self):
+        from tools.widget.geom import clamp_to_work
+        self.assertEqual(clamp_to_work((10, 10, 3000, 3000), self.WORK),
+                         (0, 0, 3000, 3000))
+
+
 if __name__ == "__main__":
     unittest.main()
