@@ -75,6 +75,9 @@ Markdown + HTML 报告（runs/，本机）
 
 ## 五、快速开始
 
+> 中途任何一步报错，别往下猜：先 `python tools\doctor.py`，再查
+> **[docs/部署与排错-AI版.md](docs/部署与排错-AI版.md)** 第 5 节的故障字典（按报错原文搜）。
+
 ```bash
 git clone https://github.com/Hello18362/wechat-work-hub.git
 cd wechat-work-hub
@@ -109,12 +112,14 @@ Windows 用户也可以直接双击 `一键启动.bat` 拉起本地控制台。
 （Claude Code / Cursor / Codex / 本项目的 DSH 都行），把仓库地址换成你自己的：
 
 > 帮我把 `https://github.com/Hello18362/wechat-work-hub` 装到本地并跑起来。
-> 步骤：克隆仓库 → 用 Python 3.10+ 建虚拟环境 → `pip install -e .` →
-> 运行 `python tools/launch.py` 起本地控制台 → 打开 `http://127.0.0.1:5710` →
+> **严格按仓库里的 `docs/部署与排错-AI版.md` 执行，不要自己发明步骤。**
+> 步骤：克隆仓库 → 用 Python 3.11 建虚拟环境 `.venv` → `.venv\Scripts\python.exe -m pip install -e .` →
+> 运行 `.venv\Scripts\python.exe tools\doctor.py --json`，把其中 ❌ 项按 `fix` 字段逐条处理到没有 ❌ →
+> 运行 `.venv\Scripts\python.exe tools\launch.py --no-browser` 起本地控制台，打开它打印的地址 →
 > 访问 `/health` 确认返回 `"status": "ok"`。
 > 如果机器上还没有解密数据源，就用仓库自带的样例数据验证：
-> `python main.py --group "XX项目工作群" --date 2026-10-27 -f both`。
-> 任何一步报错，把完整报错贴给我，别自己猜着跳过。
+> `.venv\Scripts\python.exe main.py --group "XX项目工作群" --date 2026-10-27 -f both`。
+> 任何一步报错，先按文档第 5 节用报错原文查；查不到再把完整报错贴给我，别自己猜着跳过。
 
 AI 装完，你在浏览器里应该看到控制台。**怎么判断它真的装对了**，看三件事：
 
@@ -497,6 +502,10 @@ python tests/test_server.py
 ---
 
 ## 十三、常见问题
+
+> 装不上、跑不通、报错看不懂，先看 **[docs/部署与排错-AI版.md](docs/部署与排错-AI版.md)**：
+> 30 条「现象 → 根因 → 处理 → 复验」的故障字典，写给人和 AI 都能直接照着做。
+> 想快速判断这台机器行不行：`python tools\doctor.py`（加 `--json` 给 AI 解析）。
 
 **Q：跑出来是空的 / 提示找不到数据库？**
 先确认三件事：微信 PC 版已登录、解密工具已成功执行、`.env` 的 `WX_DECRYPTED_DIR` 指向的目录里确实有 `*.db` 文件。
