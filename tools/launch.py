@@ -82,10 +82,18 @@ def _read_port_from_text(text: str, default: int = DEFAULT_PORT) -> int:
 def _read_port() -> int:
     """从 settings.yaml 读端口；读不到就用 5710（配置坏了也不该启动不了）。
 
+    优先级：WEB_PORT 环境变量 > settings.yaml 的 web.port > 默认 5710。
+
     注意：全新机器上第一次运行时 PyYAML 还没装上，这里必须有不依赖 yaml 的
     兜底。否则端口会退回 5710，而服务起来后按配置监听别的端口 —— 探测永远
     探不到，表现就是「日志说已就绪，启动器却说启动超时」。
     """
+    env_port = os.environ.get("WEB_PORT", "").strip()
+    if env_port:
+        try:
+            return int(env_port)
+        except ValueError:
+            pass          # 写错了就按配置文件走，不因为一个环境变量起不来
     cfg_path = ROOT / "config" / "settings.yaml"
     try:
         import yaml

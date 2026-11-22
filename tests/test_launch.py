@@ -85,6 +85,42 @@ class ReadPortTest(unittest.TestCase):
         self.assertIsInstance(launch._read_port_from_text(text), int)
 
 
+class EnvPortTest(unittest.TestCase):
+    """WEB_PORT 是「5710 被占用」时的逃生口，必须优先于 settings.yaml。
+
+    这条守住一个真实事故：启动器与服务读的不是同一个端口，于是日志说
+    「已就绪」、启动器却报「启动超时」。
+    """
+
+    def setUp(self) -> None:
+        import os
+
+        self._os = os
+        self._saved = os.environ.pop("WEB_PORT", None)
+
+    def tearDown(self) -> None:
+        if self._saved is None:
+            self._os.environ.pop("WEB_PORT", None)
+        else:
+            self._os.environ["WEB_PORT"] = self._saved
+
+    def test_env_overrides_config_file(self) -> None:
+        self._os.environ["WEB_PORT"] = "5899"
+        self.assertEqual(launch._read_port(), 5899)
+
+    def test_bad_env_value_is_ignored(self) -> None:
+        self._os.environ["WEB_PORT"] = "not-a-port"
+        self.assertIsInstance(launch._read_port(), int)
+
+    def test_env_is_treated_the_same_by_service_config(self) -> None:
+        """launch 与 core.config 必须对同一个 WEB_PORT 得出同一个端口。"""
+        from core.config import load_settings
+
+        self._os.environ["WEB_PORT"] = "5898"
+        self.assertEqual(launch._read_port(), 5898)
+        self.assertEqual(int(load_settings()["web"]["port"]), 5898)
+
+
 class ReadyUrlTest(unittest.TestCase):
     def test_extracts_url(self) -> None:
         log = ("===== 2026-11-22 17:22:30 后台服务启动 =====\n"

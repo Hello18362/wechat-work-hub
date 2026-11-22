@@ -250,6 +250,18 @@ def load_settings(path: Optional[Path] = None, reload_env: bool = True) -> Dict[
         or os.environ.get("DOUBAO_TEXT_MODEL", "")
     )
     cfg["_env"]["vision_model"] = os.environ.get("DOUBAO_VISION_MODEL", "")
+
+    # 端口/监听地址也可以用环境变量临时覆盖，方便「5710 被占用」时换个端口跑，
+    # 而不必改动仓库里的 settings.yaml（改了容易忘记改回来）。
+    _env_port = os.environ.get("WEB_PORT", "").strip()
+    if _env_port:
+        try:
+            cfg.setdefault("web", {})["port"] = int(_env_port)
+        except ValueError:
+            pass
+    _env_host = os.environ.get("WEB_HOST", "").strip()
+    if _env_host:
+        cfg.setdefault("web", {})["host"] = _env_host
     return cfg
 
 

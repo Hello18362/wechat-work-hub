@@ -566,12 +566,17 @@ class HubHandler(BaseHTTPRequestHandler):
         """轻量健康检查：不碰数据源、不扫目录，给探针/脚本用。
 
         约定：进程能响应 200 即视为「活着」；数据源是否在线看 /api/status。
+
+        `root` 是这个服务所在的项目目录：一台机器上可能同时有多个副本
+        （干净克隆出来的测试副本、旧版本），只靠端口无法区分，tools/doctor.py
+        用它判断「5710 上跑的是不是我这一份」。
         """
         self._json(
             {
                 "status": "ok",
                 "version": APP_VERSION,
                 "uptime_seconds": int(time.time() - _STARTED_AT),
+                "root": str(PROJECT_ROOT),
             }
         )
 
