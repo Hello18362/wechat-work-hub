@@ -24,6 +24,7 @@ from PIL import Image, ImageChops, ImageFilter
 from . import render, theme as T, win32
 from .geom import (clamp_to_work, hover_pad_hit, panel_pos_from_box, snap_x,
                    visible_box)
+from .watchdog import anim_action, drag_lost
 from .store import CardStore, DoneStore, WidgetState, card_key
 
 TID_FRAME = 1
@@ -50,6 +51,18 @@ def _dbg(*parts) -> None:
         ensure_dir()
         with open(APP_DIR / "widget.log", "a", encoding="utf-8") as fh:
             fh.write(time.strftime("%H:%M:%S ") + " ".join(str(p) for p in parts) + "\n")
+    except Exception:
+        pass
+
+
+def _warn(*parts) -> None:
+    """自愈事件一律落盘，不受 WIDGET_DEBUG 影响——用户报「没反应」时要查得到。"""
+    try:
+        from .store import APP_DIR, ensure_dir
+        ensure_dir()
+        with open(APP_DIR / "widget.log", "a", encoding="utf-8") as fh:
+            fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + "[自愈] "
+                     + " ".join(str(p) for p in parts) + "\n")
     except Exception:
         pass
 
@@ -95,6 +108,8 @@ class Widget:
         self._drag: Optional[Dict] = None
         self._press: Optional[Dict] = None
         self.anim: Optional[Dict] = None
+        self._drag_misses = 0
+        self._repair_sig = None
         self._last_leave = time.perf_counter()   # 启动时先给满延迟，别一开机就缩成细条
         self._inside = True
         self._last_data = time.perf_counter()
@@ -369,6 +384,7 @@ class Widget:
     def _anim_frame(self) -> None:
         a = self.anim
         now = time.perf_counter()
+        a["last"] = now          # 看门狗靠这个判断帧定时器是不是还活着
         t = (now - a["t0"]) / a["dur"]
         e = T.spring(t)                      # 统一手感曲线，带一点点回弹
         rect = T.lerp_rect(a["from"], a["to"], e)
@@ -423,7 +439,36 @@ class Widget:
 
     # ------------------------------------------------------------ 形态切换
 
+    def _clear_stale_anim(self) -> None:
+        """切换形态前先清掉卡死的动画，否则这一下点击就白点了。"""
+        if anim_action(self.anim, time.perf_counter()) == "force":
+            self._force_finish_anim("切换形态前发现动画卡死")
+
+    def _repair_shape(self) -> None:
+        """状态说自己是某个形态，窗口却是另一个尺寸——动画半路没了，直接摆正。
+
+        这条是「缩到边缘后没反应」的兜底：状态里 mode=expanded、
+        窗口却还是 34×192 的细条，用户悬停/点击都对不上。
+        """
+        if self.anim or self.dragging or self._fly:
+            return
+        want = self._rect_for(self.mode)
+        cur = self.win_rect
+        if all(abs(int(a) - int(b)) <= 2 for a, b in zip(cur, want)):
+            self._repair_sig = None
+            return
+        sig = (self.mode, tuple(int(v) for v in cur), tuple(int(v) for v in want))
+        if sig == self._repair_sig:
+            return                     # 刚修过还是这样，别每 100ms 刷一次日志
+        self._repair_sig = sig
+        _warn("窗口尺寸与状态不一致（%s，期望 %s），已摆正"
+              % (tuple(int(v) for v in cur), tuple(int(v) for v in want)))
+        self._apply_rect(want, paint=False)
+        self.render(ss=1)
+        self._flush_timers()
+
     def to_ball(self) -> None:
+        self._clear_stale_anim()
         if self.mode == "ball" or self.anim:
             return
         self._animate("ball")
@@ -432,7 +477,9 @@ class Widget:
 
     def to_expanded(self) -> None:
         _dbg("to_expanded called mode=%s anim=%s" % (self.mode, bool(self.anim)))
+        self._clear_stale_anim()
         if self.mode == "expanded" or self.anim:
+            self._repair_shape()      # 已经是 expanded 但窗口尺寸不对，也补一次
             return
         if self.side:
             left, top, right, bottom = self._work()
@@ -446,6 +493,7 @@ class Widget:
         self._last_leave = time.perf_counter()
 
     def to_sliver(self, auto: bool = False) -> None:
+        self._clear_stale_anim()
         if self.mode != "expanded" or self.anim:
             return
         if not self.side:
@@ -763,12 +811,56 @@ class Widget:
                 and self._prewarm_stamp != (self.panel_pos, self.k)):
             self._prewarm_expanded()
 
+        # 先让看门狗兜一次：动画/拖动卡住也要能自己活过来，不然窗口就僵死了
+        self._watchdog(now)
+
         self._poll_cursor(now)
 
         if self._ball_click_job is not None and now - self._ball_click_job > 0.28:
             self._ball_click_job = None
             if self.mode == "ball":
                 self.to_expanded()
+
+    def _force_finish_anim(self, why: str = "") -> None:
+        """动画卡死时直接落到终态：宁可少几帧过渡，也不能把窗口冻在那儿。"""
+        a = self.anim
+        if not a:
+            return
+        self.anim = None
+        self.mode = a.get("to_mode") or self.mode
+        self._apply_rect(self._rect_for(self.mode), paint=False)
+        self.render(ss=1)
+        self._flush_timers()
+        _warn("动画没收尾（%s），已直接落到 %s" % (why or "超时", self.mode))
+        done = a.get("on_done")
+        if done:
+            try:
+                done()
+            except Exception:
+                pass
+
+    def _watchdog(self, now: float) -> None:
+        """100ms 的空闲定时器顺带当心跳：帧定时器不跑时把动画推下去，拖动残留也清掉。"""
+        act = anim_action(self.anim, now)
+        if act == "tick":
+            self._anim_frame()          # 定时器没动静，这里补一帧接着走
+        elif act == "force":
+            self._force_finish_anim("帧定时器长时间没动")
+
+        if self.dragging:
+            down = bool(win32.user32.GetAsyncKeyState(0x01) & 0x8000)
+            self._drag_misses = 0 if down else self._drag_misses + 1
+            if drag_lost(self.dragging, down, self._drag_misses):
+                self.dragging = False
+                self._press = None
+                self._drag_misses = 0
+                _warn("拖动状态残留（系统里左键早已松开），已清理")
+                self.render(ss=1)
+        else:
+            self._drag_misses = 0
+
+        if not self.anim:
+            self._repair_shape()
 
     def _poll_cursor(self, now: float) -> None:
         if self.anim or self.dragging or not self.running:
