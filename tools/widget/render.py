@@ -225,7 +225,8 @@ def _frost(w: float, h: float, margin: float, radius: float, k: float,
         panel = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
     elif backdrop is not None and not drag:
         half = (max(8, cw // 2), max(8, ch // 2))
-        radius_px = max(1.0, (2 if fast else 1) * k)
+        # 模糊在**半分辨率**上做，所以半径取物理像素的一半（≈2 倍视觉半径）
+        radius_px = max(1.0, (T.FROST_BLUR_FAST if fast else T.FROST_BLUR) * k * 0.5)
         bd = backdrop.resize(half, Image.BILINEAR).filter(ImageFilter.GaussianBlur(radius_px))
         # 去一点饱和：磨砂玻璃该是银灰调，不是彩色塑料
         bd = Image.blend(bd, bd.convert("L").convert("RGB"), 0.34)
