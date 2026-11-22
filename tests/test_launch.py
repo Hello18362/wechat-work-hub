@@ -48,5 +48,59 @@ class MissingDepsTest(unittest.TestCase):
         )
 
 
+class ReadPortTest(unittest.TestCase):
+    """端口读取必须不依赖 PyYAML —— 全新机器上第一次运行时 yaml 还没装。"""
+
+    SAMPLE = (
+        "chatlog:\n"
+        "  api_base: http://127.0.0.1:5030\n"
+        "  timeout: 15\n"
+        "asr:\n"
+        "  model: small\n"
+        "web:\n"
+        "  host: 127.0.0.1\n"
+        "  port: 5763\n"
+        "  open_browser: true\n"
+    )
+
+    def test_reads_web_port(self) -> None:
+        self.assertEqual(launch._read_port_from_text(self.SAMPLE), 5763)
+
+    def test_ignores_port_under_other_sections(self) -> None:
+        text = "chatlog:\n  port: 9999\nweb:\n  port: 5720\n"
+        self.assertEqual(launch._read_port_from_text(text), 5720)
+
+    def test_falls_back_when_absent(self) -> None:
+        self.assertEqual(launch._read_port_from_text("web:\n  host: x\n"),
+                         launch.DEFAULT_PORT)
+        self.assertEqual(launch._read_port_from_text(""), launch.DEFAULT_PORT)
+
+    def test_quoted_value_and_comment(self) -> None:
+        text = "web:\n  port: \"5712\"  # 端口\n"
+        self.assertEqual(launch._read_port_from_text(text), 5712)
+
+    def test_real_config_parses_to_int(self) -> None:
+        """仓库自带配置必须能被无 yaml 的解析路径读出整数端口。"""
+        text = (PROJECT_ROOT / "config" / "settings.yaml").read_text(encoding="utf-8")
+        self.assertIsInstance(launch._read_port_from_text(text), int)
+
+
+class ReadyUrlTest(unittest.TestCase):
+    def test_extracts_url(self) -> None:
+        log = ("===== 2026-11-22 17:22:30 后台服务启动 =====\n"
+               "  本地控制台已就绪：http://127.0.0.1:5762\n"
+               "  Ctrl+C 退出\n")
+        self.assertEqual(launch.ready_url_from_log(log), "http://127.0.0.1:5762")
+
+    def test_empty_when_not_ready(self) -> None:
+        self.assertEqual(launch.ready_url_from_log("启动中…\n"), "")
+        self.assertEqual(launch.ready_url_from_log(""), "")
+
+    def test_uses_last_occurrence(self) -> None:
+        log = ("  本地控制台已就绪：http://127.0.0.1:5710\n"
+               "  本地控制台已就绪：http://127.0.0.1:5720\n")
+        self.assertEqual(launch.ready_url_from_log(log), "http://127.0.0.1:5720")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

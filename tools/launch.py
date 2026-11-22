@@ -58,14 +58,45 @@ def _install_deps() -> bool:
     return rc == 0
 
 
+def _read_port_from_text(text: str, default: int = DEFAULT_PORT) -> int:
+    """不依赖 PyYAML 也能读出 web.port（全新机器上 yaml 还没装时要用）。"""
+    in_web = False
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not raw[:1].isspace():          # 顶格说明是新的一节
+            head = stripped.split(":", 1)[0].strip()
+            in_web = head == "web"
+            continue
+        if in_web and stripped.startswith("port:"):
+            try:
+                value = stripped.split(":", 1)[1].split("#", 1)[0]
+                return int(value.strip().strip("\"'"))
+            except (IndexError, ValueError):
+                return default
+    return default
+
+
 def _read_port() -> int:
-    """从 settings.yaml 读端口；读不到就用 5710（配置坏了也不该启动不了）。"""
+    """从 settings.yaml 读端口；读不到就用 5710（配置坏了也不该启动不了）。
+
+    注意：全新机器上第一次运行时 PyYAML 还没装上，这里必须有不依赖 yaml 的
+    兜底。否则端口会退回 5710，而服务起来后按配置监听别的端口 —— 探测永远
+    探不到，表现就是「日志说已就绪，启动器却说启动超时」。
+    """
+    cfg_path = ROOT / "config" / "settings.yaml"
     try:
         import yaml
 
-        cfg = yaml.safe_load((ROOT / "config" / "settings.yaml").read_text(encoding="utf-8")) or {}
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
         return int((cfg.get("web") or {}).get("port", DEFAULT_PORT))
     except Exception:  # noqa: BLE001
+        pass
+    try:
+        return _read_port_from_text(cfg_path.read_text(encoding="utf-8"))
+    except OSError:
         return DEFAULT_PORT
 
 
@@ -101,6 +132,22 @@ def _log_tail(lines: int = 12) -> str:
     except OSError:
         return f"（日志读取失败：{path}）"
     return "\n".join(content[-lines:])
+
+
+def ready_url_from_log(text: str) -> str:
+    """从服务日志里抓「本地控制台已就绪：http://…」那一行的地址。
+
+    兜底用：万一端口读错了（比如配置改了），服务自己会说它监听在哪，
+    启动器照着打开就行，不必让用户看「启动超时」却明明能访问。
+    """
+    marker = "本地控制台已就绪："
+    for line in reversed(text.splitlines()):
+        pos = line.find(marker)
+        if pos >= 0:
+            url = line[pos + len(marker):].strip()
+            if url.startswith("http://") or url.startswith("https://"):
+                return url
+    return ""
 
 
 def _pids_listening(port: int) -> list[str]:
@@ -236,6 +283,25 @@ def main() -> int:
         if waited % 20 == 0:
             print(f"服务启动中…已等待 {waited // 2} 秒"
                   + ("（首次启动较慢，请耐心）" if first_start_after_install else ""))
+
+    # 4) 兜底：探测失败但服务日志说已经就绪（多半是端口读错了，比如配置里
+    #    改过端口、而启动器在依赖装好前读了配置）。这时候按日志里的地址打开，
+    #    不要让用户对着一个其实能用的服务看「启动超时」。
+    log_path = ROOT / "logs" / "console.out"
+    try:
+        ready = ready_url_from_log(log_path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        ready = ""
+    if ready:
+        print(f"服务已就绪（按服务日志判断）：{ready}")
+        print(f"提示：配置里的端口是 {port}，实际监听的是 {ready.rsplit(':', 1)[-1]}，"
+              "建议检查 config/settings.yaml")
+        if "--no-browser" not in sys.argv:
+            try:
+                webbrowser.open(ready)
+            except Exception:  # noqa: BLE001
+                pass
+        return 0
 
     print("启动超时。最后几行日志：")
     print(_log_tail())
