@@ -53,6 +53,12 @@ python tools/doctor.py --json   # 给 AI 看（含每项 id / level / fix）
 ## 2. 标准安装（5 步，逐步验证）
 
 > 全程在一台**全新机器**上验证过（干净克隆 + 全新 venv + 非默认端口），总耗时约 1~3 分钟（pip 有缓存时十几秒）。
+>
+> **最快路径（推荐给第一次装的人）**：拿到代码后直接双击 `一键启动.bat`。它会自己找 Python、
+> 建 `.venv`、装依赖、起服务、开浏览器。2026-11-23 实测：干净克隆 + 没有任何环境，**30 秒**到
+> 「启动成功：http://127.0.0.1:××××」。
+>
+> 下面 5 步是「想知道每一步在干什么 / 双击失败要定位」时用的，两条路结果一样。
 
 ### 步骤 1：拿到代码
 
@@ -66,12 +72,15 @@ cd wechat-work-hub
 **验证**：`ls` 能看到 `main.py`、`tools/`、`config/`、`data/samples/`。
 **失败**：`git` 不存在 → 用 zip；`clone` 超时 → 见 5.28。
 
-### 步骤 2：建虚拟环境
+### 步骤 2：建虚拟环境（双击 bat 的用户可跳过）
 
 ```bash
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -U pip
 ```
+
+> 双击 `一键启动.bat` 时这一步是**自动完成**的（没有 `.venv` 就当场建一个）。
+> 下面手动敲的两行，是给命令行用户、或者想确认环境干净的人用的。
 
 **为什么必须用 `.venv`**：这台机器上可能有好几个 Python（商店版 / conda / WorkBuddy 自带的 3.13）。
 依赖装进 A，运行时用了 B，报错永远是 `ModuleNotFoundError`，而且看起来莫名其妙。
@@ -104,7 +113,7 @@ python -m venv .venv
 两种方式，选一个：
 
 ```bash
-# A. 双击（最省事，Windows）
+# A. 双击（最省事；首次会自动建 .venv 并装依赖）
 一键启动.bat
 
 # B. 命令行（能看见日志，排错时用这个）
@@ -613,7 +622,9 @@ python -m venv --without-pip .venv
 
 请严格按仓库里的 docs/部署与排错-AI版.md 执行，不要自己发明步骤：
 1. 克隆仓库到 <你选一个纯英文短路径，如 D:\wwh>。
-2. python -m venv .venv，然后 .venv\Scripts\python.exe -m pip install -e .（国内可加清华源）。
+2. python -m venv .venv，然后 .venv\Scripts\python.exe -m pip install -e .（国内可加清华源；
+   启动器装依赖失败时会自动换清华源重试一次，不必你手动干预）。
+   如果你在 Windows 上能双击文件，直接双击 一键启动.bat 也行：它会自建 .venv 并装依赖。
 3. 运行 .venv\Scripts\python.exe tools\doctor.py --json，把 ❌ 项按 fix 字段逐条处理，
    直到没有 ❌（⚠️ 和 ➖ 允许存在）。
 4. 运行 .venv\Scripts\python.exe tools\launch.py --no-browser 起服务，
@@ -644,6 +655,9 @@ python -m venv --without-pip .venv
 | 没有统一的体检入口 | 重写 `tools/doctor.py`（含 `--json`） |
 | 悬浮窗跑到屏外 / 卡住不动 | 可见区域夹取 + 看门狗自愈 |
 | 磨砂背景糊在壁纸上 | 模糊半径按比例放大（26px @2x） |
+| 第一次双击时没有 `.venv`，依赖被装进系统 Python | `一键启动.bat` 首次运行自动创建 `.venv` |
+| Python 装在 `C:\Program Files\...` 时 bat 调用被空格截断 | 解释器统一解析成 `sys.executable` 完整路径并加引号 |
+| 国内网络直连 PyPI 装不动 | 装依赖失败自动换清华源重试一次 |
 
 **还欠着的**（诚实列出，别在文档里假装没有）：
 

@@ -48,14 +48,21 @@ def _missing_deps(deps=None) -> list:
     return missing
 
 
+MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+
 def _install_deps() -> bool:
-    """`pip install -e ROOT` 一把装齐，成功返回 True。"""
+    """`pip install -e ROOT` 一把装齐，成功返回 True。
+
+    先直连 PyPI；失败就换国内镜像再试一次。装依赖是最容易卡住新人的一步，
+    一次网络超时不该让人从头再来。
+    """
     print("正在自动安装依赖（首次可能要几分钟）…")
-    rc = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-e", str(ROOT)],
-        cwd=str(ROOT),
-    ).returncode
-    return rc == 0
+    base = [sys.executable, "-m", "pip", "install", "-e", str(ROOT)]
+    if subprocess.run(base, cwd=str(ROOT)).returncode == 0:
+        return True
+    print("直连 PyPI 没成功，换国内镜像再试一次…")
+    return subprocess.run(base + ["-i", MIRROR], cwd=str(ROOT)).returncode == 0
 
 
 def _read_port_from_text(text: str, default: int = DEFAULT_PORT) -> int:

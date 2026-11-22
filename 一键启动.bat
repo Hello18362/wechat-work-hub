@@ -24,19 +24,21 @@ if not exist "%~dp0tools\launch.py" (
 )
 
 REM ---- 找 Python ----
-REM 顺序：PATH 里的 python -> py 启动器 -> 默认安装目录里版本号最高的那个
+REM 顺序：项目自带 .venv -> PATH 里的 python -> py 启动器 -> 默认安装目录里版本号最高的那个
+REM 一律解析成完整路径，后面统一用 "%PY%" 调用，避免 "C:\Program Files\..." 被空格截断。
 set "PY="
 
-REM ---- 优先用项目自带的虚拟环境（按 README 建过 .venv 就用它，否则依赖会装到别的 Python 上）----
-if not defined PY if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
 if not defined PY if exist "%~dp0venv\Scripts\python.exe" set "PY=%~dp0venv\Scripts\python.exe"
 
-python -V >nul 2>nul
-if not defined PY if not errorlevel 1 set "PY=python"
+if not defined PY (
+  python -V >nul 2>nul
+  if not errorlevel 1 for /f "delims=" %%P in ('python -c "import sys;print(sys.executable)" 2^>nul') do set "PY=%%P"
+)
 
 if not defined PY (
   py -3 -V >nul 2>nul
-if not defined PY if not errorlevel 1 set "PY=py -3"
+  if not errorlevel 1 for /f "delims=" %%P in ('py -3 -c "import sys;print(sys.executable)" 2^>nul') do set "PY=%%P"
 )
 
 if not defined PY (
@@ -63,10 +65,24 @@ if not defined PY (
   exit /b 1
 )
 
+REM ---- 首次运行：自动建虚拟环境，之后所有依赖都装进它 ----
+REM 这一步是给「只想双击一次」的人准备的：不建 .venv 的话，依赖会装进系统
+REM Python，之后换成别的 Python 跑就又是 ModuleNotFoundError。
+if not exist "%~dp0.venv\Scripts\python.exe" (
+  echo  首次运行：正在创建虚拟环境 .venv（约十秒）...
+  "%PY%" -m venv "%~dp0.venv" >nul 2>nul
+  if exist "%~dp0.venv\Scripts\python.exe" (
+    echo  虚拟环境已创建：.venv
+  ) else (
+    echo  [提示] 虚拟环境没建起来，这次直接用上面那个 Python 运行。
+  )
+)
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+
 echo  使用解释器：%PY%
 echo.
 
-%PY% "%~dp0tools\launch.py"
+"%PY%" "%~dp0tools\launch.py"
 
 if errorlevel 1 (
   echo.
