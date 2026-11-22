@@ -26,12 +26,17 @@ if not exist "%~dp0tools\launch.py" (
 REM ---- 找 Python ----
 REM 顺序：PATH 里的 python -> py 启动器 -> 默认安装目录里版本号最高的那个
 set "PY="
+
+REM ---- 优先用项目自带的虚拟环境（按 README 建过 .venv 就用它，否则依赖会装到别的 Python 上）----
+if not defined PY if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+if not defined PY if exist "%~dp0venv\Scripts\python.exe" set "PY=%~dp0venv\Scripts\python.exe"
+
 python -V >nul 2>nul
-if not errorlevel 1 set "PY=python"
+if not defined PY if not errorlevel 1 set "PY=python"
 
 if not defined PY (
   py -3 -V >nul 2>nul
-  if not errorlevel 1 set "PY=py -3"
+if not defined PY if not errorlevel 1 set "PY=py -3"
 )
 
 if not defined PY (

@@ -13,6 +13,11 @@ REM  失败：PY 为空，调用方自己提示
 REM =====================================================================
 set "PY="
 
+REM ---- 优先用项目自带的虚拟环境（按 README 建过 .venv 就用它，否则依赖会装到别的 Python 上）----
+if not defined PY if exist "%~dp0..\.venv\Scripts\python.exe" set "PY=%~dp0..\.venv\Scripts\python.exe"
+if not defined PY if exist "%~dp0..\venv\Scripts\python.exe" set "PY=%~dp0..\venv\Scripts\python.exe"
+if defined PY "%PY%" -c "import PIL,requests,yaml,bs4" >nul 2>nul || set "PY="
+
 call :trycmd python
 if not defined PY call :trycmd python3
 if not defined PY call :trycmd py

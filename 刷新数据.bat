@@ -11,6 +11,11 @@ echo  ==========================================
 echo.
 
 set "PY="
+
+REM ---- 优先用项目自带的虚拟环境（按 README 建过 .venv 就用它，否则依赖会装到别的 Python 上）----
+if not defined PY if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+if not defined PY if exist "%~dp0venv\Scripts\python.exe" set "PY=%~dp0venv\Scripts\python.exe"
+if defined PY "%PY%" -c "import PIL,requests,yaml,bs4" >nul 2>nul || set "PY="
 for /f "delims=" %%P in ('where python.exe 2^>nul') do if not defined PY set "PY=%%P"
 if not defined PY for /f "delims=" %%P in ('py -3 -c "import sys;print(sys.executable)" 2^>nul') do if not defined PY set "PY=%%P"
 
