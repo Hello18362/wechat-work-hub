@@ -34,6 +34,9 @@ MENU_REPORT = 1001
 MENU_RELOAD = 1002
 MENU_TOGGLE = 1003
 MENU_QUIT = 1004
+MENU_UPDATE = 1005
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 MODES = ("expanded", "ball", "sliver")
 CARD_DUMP = __import__("pathlib").Path(os.environ.get("LOCALAPPDATA") or ".") / "WeChatWorkHub" / "paint.png"
@@ -110,6 +113,7 @@ class Widget:
         self.anim: Optional[Dict] = None
         self._drag_misses = 0
         self._repair_sig = None
+        self._anim_busy = False
         self._last_leave = time.perf_counter()   # 启动时先给满延迟，别一开机就缩成细条
         self._inside = True
         self._last_data = time.perf_counter()
@@ -349,6 +353,10 @@ class Widget:
 
     def _animate(self, to_mode: str, dur_ms: int = T.ANIM_MS,
                  on_done=None) -> None:
+        if self._anim_busy or self.anim:
+            # 内联帧循环里 pump 出来的消息可能又要求切形态，直接丢掉，
+            # 否则会套娃（A 动画中开 B 动画，rect/尺寸全乱）
+            return
         _prep0 = time.perf_counter()
         to_rect = self._rect_for(to_mode)
         # 目标比当前大（球 -> 面板）时，先按目标尺寸抓一张干净背景，
@@ -380,6 +388,33 @@ class Widget:
         _dbg("anim start", prev_mode, "->", to_mode,
              "prep %.0fms" % ((time.perf_counter() - _prep0) * 1000))
         self._flush_timers()
+        self._run_anim_inline()
+
+    def _run_anim_inline(self) -> None:
+        """同步把这一段动画跑完，不顺带指望 WM_TIMER。
+
+        历史问题：帧定时器偶尔整个失效（拿不到任何异常日志），动画就永远停在
+        第一帧，`self.anim` 一直是 truthy，于是 `_poll_cursor` 和点击全部早退，
+        用户看到的就是「点了没反应」「缩成球再也点不开」。定时器不可靠，
+        就把帧循环放在这里自己跑，中间 pump 一下消息，避免界面假死。
+        """
+        a = self.anim
+        if not a:
+            return
+        deadline = time.perf_counter() + a["dur"] + 1.5
+        frames = 0
+        self._anim_busy = True
+        try:
+            while self.anim is not None and time.perf_counter() < deadline:
+                self._anim_frame()
+                frames += 1
+                win32.pump()
+        finally:
+            self._anim_busy = False
+        if self.anim is not None:
+            self._force_finish_anim("内联帧循环没跑完")
+        elif DEBUG:
+            _dbg("anim inline", self.mode, "frames", frames)
 
     def _anim_frame(self) -> None:
         a = self.anim
@@ -621,6 +656,36 @@ class Widget:
                 self._open_report(None)
             else:
                 self._ball_click_job = now
+                self._arm_ball_click()
+
+    def _arm_ball_click(self) -> None:
+        """0.28 秒后决定这一下是「单击展开」还是「双击打开报告」。
+
+        不用 SetTimer：帧/空闲定时器偶尔会整条失效（用户报过「点了没反应」），
+        改成后台线程睡够再往窗口投一条消息，只要消息循环活着就一定执行。
+        """
+        def fire():
+            time.sleep(0.30)
+            try:
+                self.win.post()
+            except Exception:
+                pass
+
+        try:
+            import threading
+            t = threading.Thread(target=fire, name="ball-click", daemon=True)
+            t.start()
+        except Exception:  # noqa: BLE001 - 起不了线程就退回定时器轮询
+            pass
+
+    def _flush_ball_click(self) -> None:
+        if self._ball_click_job is None:
+            return
+        if time.perf_counter() - self._ball_click_job < 0.28:
+            return
+        self._ball_click_job = None
+        if self.mode == "ball":
+            self.to_expanded()
 
     def _finish_drag(self) -> None:
         """松手：按「看得见的那块」吸边、夹进工作区，再换回 panel 坐标。
@@ -667,6 +732,34 @@ class Widget:
         if self.store.load():
             self._last_backdrop = 0.0
             self.render(ss=1)
+
+    def request_update(self) -> None:
+        """菜单「立即更新消息」：后台跑一次 daily_job --force，不卡悬浮窗。
+
+        自动守护默认最多一小时才跑一次（省钱），但不该让用户干等；
+        想马上看到最新卡片就点这个。
+        """
+        script = os.path.join(ROOT, "tools", "auto_daemon.py")
+        if not os.path.exists(script):
+            return
+        exe = sys.executable or "python"
+        cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.exists(cand):
+            exe = cand
+        try:
+            import subprocess
+            subprocess.Popen(
+                [exe, script, "--force"],
+                cwd=ROOT,
+                creationflags=0x00000008 | 0x00000200,   # DETACHED | NEW_GROUP
+                close_fds=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            _warn("已触发一次立即更新（后台跑，几十秒后卡片会自己变）")
+        except Exception as exc:  # noqa: BLE001
+            _warn("触发立即更新失败：%s" % exc)
 
     # ------------------------------------------------------------ 滚轮
 
@@ -817,9 +910,7 @@ class Widget:
         self._poll_cursor(now)
 
         if self._ball_click_job is not None and now - self._ball_click_job > 0.28:
-            self._ball_click_job = None
-            if self.mode == "ball":
-                self.to_expanded()
+            self._flush_ball_click()
 
     def _force_finish_anim(self, why: str = "") -> None:
         """动画卡死时直接落到终态：宁可少几帧过渡，也不能把窗口冻在那儿。"""
@@ -934,6 +1025,10 @@ class Widget:
             if wparam == TID_IDLE:
                 self._on_idle()
                 return True, 0
+        if msg == win32.WM_APP_SELF:
+            # 后台线程投递（小球单击延时判定）——不依赖 SetTimer
+            self._flush_ball_click()
+            return True, 0
         if msg == win32.WM_NCHITTEST:
             # 投影留白（几乎全透明）处让点击穿透到桌面
             sx, sy = _xy(lparam)
@@ -973,11 +1068,14 @@ class Widget:
     def _context_menu(self) -> None:
         cx, cy = win32.cursor_pos()
         toggle_label = "展开面板" if self.mode != "expanded" else "收起成球"
-        items = [(MENU_REPORT, "打开最新报告"), (MENU_RELOAD, "重新读取数据"), None,
+        items = [(MENU_REPORT, "打开最新报告"), (MENU_UPDATE, "立即更新消息"),
+                 (MENU_RELOAD, "重新读取数据"), None,
                  (MENU_TOGGLE, toggle_label), (MENU_QUIT, "退出")]
         cmd = win32.popup_menu(self.win.hwnd, cx, cy, items)
         if cmd == MENU_REPORT:
             self._open_report(None)
+        elif cmd == MENU_UPDATE:
+            self.request_update()
         elif cmd == MENU_RELOAD:
             self.reload_data()
         elif cmd == MENU_TOGGLE:

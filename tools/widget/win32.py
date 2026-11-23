@@ -87,6 +87,8 @@ WM_SETCURSOR = 0x0020
 WM_DISPLAYCHANGE = 0x007E
 WM_DPICHANGED = 0x02E0
 WM_NCHITTEST = 0x0084
+#: 给自己投递的自定义消息（线程里 post，避免依赖 SetTimer）
+WM_APP_SELF = 0x8000 + 1
 HTTRANSPARENT = -1
 HTCLIENT = 1
 
@@ -481,6 +483,13 @@ class LayeredWindow:
     def kill_timer(self, tid: int) -> None:
         user32.KillTimer(self.hwnd, tid)
 
+    def post(self, msg: int = WM_APP_SELF) -> None:
+        """从别的线程给自己的窗口投递一条消息（SetTimer 失效时的兜底）。"""
+        try:
+            user32.PostMessageW(self.hwnd, msg, 0, 0)
+        except Exception:
+            pass
+
 
 # ------------------------------------------------------------------ 桌面取景
 
@@ -584,6 +593,27 @@ def message_loop() -> None:
             break
         user32.TranslateMessage(byref(msg))
         user32.DispatchMessageW(byref(msg))
+
+
+def pump(max_msgs: int = 40) -> int:
+    """把队列里已经排着的消息处理掉，不阻塞。
+
+    动画不再依赖 WM_TIMER 推进（SetTimer 在某些情况下会静默失效，
+    表现就是「点了没反应」，见 docs 里那条自愈记录），改成在动画函数里
+    同步跑帧，中间用这个函数把鼠标/窗口消息放出去，避免假死。
+    """
+    msg = MSG()
+    n = 0
+    while n < max_msgs:
+        if not user32.PeekMessageW(byref(msg), None, 0, 0, 0x0001):  # PM_REMOVE
+            break
+        if msg.message == 0x0012:                                    # WM_QUIT
+            user32.PostQuitMessage(0)
+            break
+        user32.TranslateMessage(byref(msg))
+        user32.DispatchMessageW(byref(msg))
+        n += 1
+    return n
 
 
 def post_quit() -> None:
