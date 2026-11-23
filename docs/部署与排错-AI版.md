@@ -192,6 +192,9 @@ curl http://127.0.0.1:5710/health
 
 > 用法：`Ctrl+F` 搜你的**报错原文**或**现象关键词**。每条都给了「怎么确认是这个原因」，
 > 别猜，先用判定命令证实，再动手。
+>
+> 目前 **32 条**。新加的 5.31（SIWX 缺 psutil 导致消息不更新）、5.32（卡片不更新的两种原因）来自
+> 2026-11-23 的真实反馈。
 
 ### 5.1 `ModuleNotFoundError: No module named 'yaml'`（或 requests / bs4 / PIL）
 
@@ -445,11 +448,18 @@ python tools\start_widget.py --restart
 
 ### 5.19 悬浮窗卡住：不展开、不收起、点不动
 
-**根因**：动画状态没走完（帧定时器没推进），导致后续所有交互被「正在动画」挡住。
-（已修：内置看门狗，1 秒内没动静就强制落到终态，并写一行 `[自愈]` 到 `widget.log`。）
+**根因（两层，都已修）**：
+1. 帧定时器（`SetTimer`）在某些情况下**整条失效**，但没有任何异常日志。动画停在第一帧，
+   `self.anim` 一直是「真」，于是后续所有交互都被「正在动画」挡回去。
+2. 小球单击是「等 0.28 秒看有没有第二击」，这一步以前靠空闲定时器，定时器死了就永不执行。
 
-**判定**：`%LOCALAPPDATA%\WeChatWorkHub\widget.log` 里有 `[自愈]` 行。
-**处理**：升级到最新代码；临时手段是 `--restart`。
+**现在的做法**（不用定时器也能动）：
+- 动画改成**内联帧循环**：`_animate()` 里同步跑完帧，中间 `win32.pump()` 把鼠标/窗口消息放出去；
+- 小球单击改成**后台线程睡 0.30 秒后 `PostMessage(WM_APP_SELF)`**，由消息循环接手；
+- 双保险：内置看门狗仍会在 1 秒内把没收尾的动画强制落到终态，并写一行 `[自愈]` 到 `widget.log`。
+
+**判定**：`%LOCALAPPDATA%\WeChatWorkHub\widget.log` 里有 `[自愈]` 行（说明兜底生效过）。
+**处理**：升级到最新代码即可；临时手段是 `python tools\start_widget.py --restart`。
 
 ---
 
@@ -557,6 +567,64 @@ python -m venv --without-pip .venv
 
 ---
 
+### 5.31 `自动刷新失败（连续第 N 次）` / `No module named 'psutil'`
+
+**现象**：控制台日志或 `logs\console.out` 里反复出现
+
+```
+File "...\siwx\discover.py", line 6, in <module>
+  import psutil
+ModuleNotFoundError: No module named 'psutil'
+自动刷新失败（连续第 4 次），下次冷却 3600 秒
+```
+
+新消息一直进不来，卡片停在老日期。
+
+**根因**：解密工具 SIWX 有自己的一套依赖（`psutil`、`pycryptodome`、`flask`、`openpyxl`、`rich`）。
+项目一旦用 `.venv` 运行（双击 `一键启动.bat` 现在优先 `.venv`），`sys.executable` 只装了本项目依赖，
+跑 SIWX 就缺包。**这不是没装 Python，是两个 Python 各装了一半。**
+
+**现在的做法**：`core/auto_refresh.py` 会**自己挑一个真能跑 SIWX 的解释器**
+（`WX_PYTHON` > 当前 > 系统 > PATH，逐个试 `import psutil, Crypto`），挑不到才报错，并给出能直接粘的命令。
+`python tools\doctor.py` 也会检查这一项（id `siwx`）。
+
+**处理**（任选其一）：
+
+```bash
+# A. 给当前解释器补上 SIWX 的依赖（doctor 会把完整命令打出来）
+<doctor 给出的 python.exe> -m pip install -r "C:\...\siwx\requirements.txt"
+
+# B. 直接在 .env 里指定一个装好这些包的解释器
+WX_PYTHON=C:\Users\你\AppData\Local\Programs\Python\Python311\python.exe
+```
+
+验证：`python tools\refresh_data.py` 应打印「完成：解密数据已刷新。」
+
+---
+
+### 5.32 卡片不更新 / 「有新消息但就是不出新卡片」
+
+**先分清两件事**：
+
+| 你点的东西 | 它做什么 | 会不会调 AI |
+| --- | --- | --- |
+| 悬浮窗右键 →「立即更新消息」 | 立刻跑一次完整链路（拉消息 → AI → 出卡片） | 会，花钱 |
+| 悬浮窗右键 →「重新读取数据」 | 只重读磁盘上的 `cards.json`，不拉消息 | 不会 |
+| `刷新数据.bat` | 只做解密/刷新微信快照，不出卡片 | 不会 |
+
+**根因**：自动守护默认**最多 60 分钟才跑一次 AI**（`MIN_GAP_SEC`，省钱），
+所以「有新消息但距上次执行只有 N 分钟」时它是有意不跑的，日志里会这么写。
+以前写的是 2 小时，现在降到 1 小时，并且日志会告诉你「还要等 N 分钟」。
+
+**处理**：
+- 想马上要：右键悬浮窗 →「立即更新消息」（后台跑，几十秒后卡片自己变）；
+- 改间隔：`tools/auto_daemon.py` 顶部 `MIN_GAP_SEC`（秒）；
+- 想看它到底怎么判断的：`python tools\auto_daemon.py --once`。
+
+---
+
+---
+
 ## 6. 模型配置与降级
 
 | 状态 | 表现 | 怎么切 |
@@ -581,6 +649,16 @@ python -m venv --without-pip .venv
 
 形态：面板（522×820）↔ 玻璃球（96×96）↔ 右侧细条（34×192）。
 **点面板以外的地方约 5 秒会自动收成细条，鼠标移到细条上会重新展开**（细条在屏外时靠 `--restart` 找回）。
+
+右键菜单：
+
+| 菜单项 | 作用 | 是否调 AI |
+| --- | --- | --- |
+| 打开最新报告 | 浏览器打开最近一份 HTML 报告 | 否 |
+| 立即更新消息 | 后台跑一次完整链路（拉消息 → AI → 出卡片） | **是，花钱** |
+| 重新读取数据 | 只重读磁盘上的 `cards.json` | 否 |
+| 展开面板 / 收起成球 | 换形态 | 否 |
+| 退出 | 关掉悬浮窗（守护进程 60 秒内会把它拉回来，要彻底停见第 8 节） | 否 |
 
 状态文件全在 `%LOCALAPPDATA%\WeChatWorkHub\`：
 
