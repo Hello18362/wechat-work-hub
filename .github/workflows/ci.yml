@@ -37,7 +37,7 @@ jobs:
       - name: Regression tests
         # tests/test_regression.py / test_sample_client.py / test_launch.py /
         # test_widget_layout.py / test_widget_watchdog.py / test_doctor.py /
-        # test_auto_refresh.py 都是纯标准库 unittest；
+        # test_auto_refresh.py / test_setup.py 都是纯标准库 unittest；
         # tests/test_server.py 需要先起控制台服务，不进 CI。
         run: |
           python tests/test_regression.py
@@ -47,9 +47,15 @@ jobs:
           python tests/test_widget_watchdog.py
           python tests/test_doctor.py
           python tests/test_auto_refresh.py
+          python tests/test_setup.py
 
       - name: Sanity import
         run: python -c "import main, core.config, output.html, web.server; print('ok')"
+
+      - name: Setup script smoke
+        # tools/setup.py 是「别人一键部署」的入口，这里守住它至少能跑起来。
+        # 不跑 --check：自检依赖具体机器（Windows 字体/ffmpeg 等），会让 CI 结果不稳定。
+        run: python tools/setup.py --help
 
       - name: Entry points
         # wgh 入口由 pyproject.toml 的 py-modules=["main"] 提供，这里守住它不碎

@@ -27,12 +27,19 @@ if str(ROOT) not in sys.path:
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 results: list[tuple[bool, str, str]] = []
+skipped: list[tuple[str, str]] = []
 
 
 def check(ok: bool, name: str, detail: str = "") -> bool:
     results.append((ok, name, detail))
     print(("  [PASS] " if ok else "  [FAIL] ") + name + ("  " + detail if detail else ""))
     return ok
+
+
+def skip(name: str, reason: str = "") -> None:
+    """这条现在没法验，但不是故障（例如样例数据没有联系人）。不计入失败。"""
+    skipped.append((name, reason))
+    print("  [SKIP] " + name + ("  " + reason if reason else ""))
 
 
 def get(url: str, path: str, timeout: int = 30):
@@ -90,10 +97,13 @@ def run_checks(url: str) -> bool:
     print("\n=== 2. 状态接口与能力自检 ===")
     st, d = get_json(url, "/api/status")
     feats = d.get("features") or []
+    sample_mode = d.get("source_mode") == "sample"
     check(st == 200 and d.get("ok"), "GET /api/status 正常", "HTTP %s" % st)
     check("contacts" in feats, "服务端声明 contacts 能力（旧进程不会有）", "features=%s" % feats)
     check("pin" in feats, "服务端声明 pin 能力", "")
     check(d.get("chatlog_online") is True, "数据源 health 正常", "chatlog_online=%s" % d.get("chatlog_online"))
+    if sample_mode:
+        print("       数据源 = 内置样例（没有真实联系人/公众号，下面相关项记为 SKIP 而不是失败）")
 
     print("\n=== 3. 群列表 / 置顶 ===")
     st, d = get_json(url, "/api/groups")
@@ -118,8 +128,13 @@ def run_checks(url: str) -> bool:
     cs = d.get("contacts") or []
     total = d.get("total")
     check(st == 200 and d.get("ok"), "GET /api/contacts 正常", "HTTP %s" % st)
-    check(isinstance(total, int) and total > 0, "好友总数 > 0", "total=%s" % total)
-    check(len(cs) > 0, "返回了好友条目", "本次返回 %d 条" % len(cs))
+    # 三种数据源里，只有接真实微信记录才有联系人；样例数据本来就没有。
+    if sample_mode or (isinstance(total, int) and total == 0):
+        skip("好友总数 > 0", "当前数据源没有联系人（样例数据，或没配 WX_DECRYPTED_DIR）")
+        skip("返回了好友条目", "同上")
+    else:
+        check(isinstance(total, int) and total > 0, "好友总数 > 0", "total=%s" % total)
+        check(len(cs) > 0, "返回了好友条目", "本次返回 %d 条" % len(cs))
     check(len(cs) <= 200, "条数被 limit 限制（防前端卡死）", "返回 %d / 上限 200" % len(cs))
     check("truncated" in d and "matched" in d, "返回 total/matched/truncated 元信息", "")
     if cs:
@@ -138,7 +153,10 @@ def run_checks(url: str) -> bool:
 
     st, d = get_json(url, "/api/contacts?category=official&limit=200")
     offs = d.get("contacts") or []
-    check(st == 200 and len(offs) > 0, "公众号列表有数据", "%d 个" % len(offs))
+    if sample_mode or not offs:
+        skip("公众号列表有数据", "当前数据源没有公众号")
+    else:
+        check(st == 200 and len(offs) > 0, "公众号列表有数据", "%d 个" % len(offs))
 
     # 关键词搜索：拿一个真实好友名的片段去查，必须能命中
     if cs:
@@ -156,11 +174,16 @@ def run_checks(url: str) -> bool:
 
     failed = [r for r in results if not r[0]]
     print("\n" + "=" * 56)
-    print("  总计 %d 项，通过 %d，失败 %d" % (len(results), len(results) - len(failed), len(failed)))
+    print("  总计 %d 项，通过 %d，失败 %d，跳过 %d" % (
+        len(results) + len(skipped), len(results) - len(failed), len(failed), len(skipped)))
     if failed:
         print("  失败项：")
         for _, name, detail in failed:
             print("    - %s %s" % (name, detail))
+    if skipped:
+        print("  跳过项（不算失败）：")
+        for name, reason in skipped:
+            print("    - %s %s" % (name, reason))
     print("=" * 56)
     return not failed
 

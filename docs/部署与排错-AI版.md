@@ -693,12 +693,19 @@ WX_PYTHON=C:\Users\你\AppData\Local\Programs\Python\Python311\python.exe
 
 ## 9. 给 AI 的完整提示词（复制即用）
 
+> 如果你只是想「装好并跑通」，短得多的版本在
+> **[docs/一键部署-给AI的操作手册.md](一键部署-给AI的操作手册.md)** —— 那份按「照着抄命令」组织，
+> 每步带期望输出和五条硬验收。本节这份偏「把前因后果讲清楚」。
+
 ```text
 帮我把 https://github.com/Hello18362/wechat-work-hub 装到本地并跑通。
 
 环境：<Windows 11 / 有 Python 3.11 / 没有微信解密数据>
 
-请严格按仓库里的 docs/部署与排错-AI版.md 执行，不要自己发明步骤：
+请严格按仓库里的 docs/一键部署-给AI的操作手册.md 执行（本文件第 5 节是它的故障字典）。
+最短路径只有一条命令：python tools\setup.py --yes
+（它会建 .venv、装依赖、生成 .env、跑 doctor 自检；重复跑是幂等的）
+如果那一步失败，或你更想手工逐步做：
 1. 克隆仓库到 <你选一个纯英文短路径，如 D:\wwh>。
 2. python -m venv .venv，然后 .venv\Scripts\python.exe -m pip install -e .（国内可加清华源；
    启动器装依赖失败时会自动换清华源重试一次，不必你手动干预）。
@@ -706,13 +713,15 @@ WX_PYTHON=C:\Users\你\AppData\Local\Programs\Python\Python311\python.exe
 3. 运行 .venv\Scripts\python.exe tools\doctor.py --json，把 ❌ 项按 fix 字段逐条处理，
    直到没有 ❌（⚠️ 和 ➖ 允许存在）。
 4. 运行 .venv\Scripts\python.exe tools\launch.py --no-browser 起服务，
-   用返回的地址访问 /health，确认 "status": "ok"。
-5. 运行 .venv\Scripts\python.exe main.py --group "XX项目工作群" --date 2026-10-27 -f both，
+   用返回的地址访问 /health，确认 "status": "ok" 且 root 就是本目录。
+5. 运行 .venv\Scripts\python.exe tools\smoke_chain.py --url http://127.0.0.1:5710，
+   确认「失败 0」（SKIP 是正常的，不算失败）。
+6. 运行 .venv\Scripts\python.exe main.py --group "XX项目工作群" --date 2026-10-27 -f both，
    确认 runs/ 下生成了 .md 和 .html。
 
-任何一步失败，先去文档第 5 节按报错原文查；查不到再把「完整报错 + 你在做什么」贴给我，
+任何一步失败，先按本文件第 5 节用报错原文查；查不到再把「完整报错 + 你在做什么」贴给我，
 不要跳过、不要用 --no-deps、不要改代码来绕过。
-最后向我报告：/health 的返回、doctor 的 fail/warn 数、生成的报告文件名。
+最后向我报告：/health 的返回、doctor 的 fail/warn 数、smoke_chain 的通过/失败/跳过数、生成的报告文件名。
 ```
 
 ---
