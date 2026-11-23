@@ -281,6 +281,43 @@ def check_datasource():
             "datasource")
 
 
+def check_siwx():
+    """解密工具（SIWX）自己的依赖：缺了它「刷新数据」永远失败、消息永远不更新。
+
+    典型症状：控制台日志里
+      File "...\siwx\discover.py", line 6, in <module>
+        import psutil
+      ModuleNotFoundError: No module named 'psutil'
+    原因：一键启动.bat 现在优先用项目 `.venv`，而 .venv 里只装了本项目的依赖。
+    """
+    cfg = _settings()
+    if cfg is None:
+        add(SKIP, "解密工具依赖", "配置读不出来，跳过", "", "siwx")
+        return
+    dec = str((cfg.get("chatlog") or {}).get("decrypted_dir") or "")
+    if not dec:
+        add(SKIP, "解密工具依赖", "没配解密目录，用不到解密工具", "", "siwx")
+        return
+
+    siwx_run = ""
+    try:
+        from core.auto_refresh import _pick_siwx_python, _resolve_siwx_run, _siwx_dep_hint
+
+        siwx_run = _resolve_siwx_run(cfg) or ""
+        if not siwx_run:
+            add(WARN, "解密工具依赖", "没找到 SIWX 的 run.py",
+                "把 SIWX 放在解密目录上级，或在 .env 设 WX_SIWX_RUN=<...>\\run.py", "siwx")
+            return
+        ok_py = _pick_siwx_python()
+        if ok_py:
+            add(OK, "解密工具依赖", "可运行（%s）" % ok_py, "", "siwx")
+        else:
+            add(BAD, "解密工具依赖", "找不到装好 psutil/pycryptodome 的 Python，自动刷新必定失败",
+                _siwx_dep_hint(siwx_run), "siwx")
+    except Exception as exc:  # noqa: BLE001
+        add(WARN, "解密工具依赖", "检查失败：%s" % exc, "手动跑一次：python tools\\refresh_data.py", "siwx")
+
+
 def check_model():
     cfg = _settings() or {}
     key = (cfg.get("_env") or {}).get("api_key") or os.environ.get("DEEPSEEK_API_KEY") or ""
@@ -369,8 +406,8 @@ def check_widget():
 def run_checks():
     results.clear()
     for fn in (check_python, check_venv, check_deps, check_platform, check_path,
-               check_writable, check_config, check_datasource, check_model,
-               check_asr, check_service, check_widget):
+               check_writable, check_config, check_datasource, check_siwx,
+               check_model, check_asr, check_service, check_widget):
         try:
             fn()
         except Exception as exc:  # noqa: BLE001

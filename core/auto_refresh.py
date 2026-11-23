@@ -69,6 +69,82 @@ def _decrypted_db_mtime(cfg: Dict[str, Any]) -> Optional[float]:
         return None
 
 
+#: SIWX 自己需要的第三方包（见它目录下的 requirements.txt）。
+#: 用来判断「这个解释器能不能跑 SIWX」——只装本项目依赖的 venv 通常缺这两个。
+SIWX_IMPORTS = ("psutil", "Crypto")
+
+
+def _siwx_env() -> Dict[str, str]:
+    """SIWX 子进程统一用 UTF-8，避免 GBK 控制台下 rich 输出 emoji 直接崩。"""
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
+def _python_candidates() -> list:
+    """能拿来跑 SIWX 的解释器候选，按优先级：WX_PYTHON > 当前 > 系统 > PATH。"""
+    out: list = []
+
+    def add(value: str) -> None:
+        value = (value or "").strip()
+        if value and value not in out:
+            out.append(value)
+
+    add(os.environ.get("WX_PYTHON", ""))
+    try:
+        import sys
+
+        if not getattr(sys, "frozen", False):
+            add(sys.executable or "")
+            add(getattr(sys, "_base_executable", "") or "")
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        import shutil
+
+        for name in ("python", "python3"):
+            path = shutil.which(name)
+            if path:
+                add(path)
+    except Exception:  # pragma: no cover
+        pass
+    return out
+
+
+def _probe_python(exe: str, timeout: float = 12.0) -> bool:
+    """这个解释器能不能 import SIWX 依赖。"""
+    try:
+        proc = subprocess.run(
+            [exe, "-c", "import " + ", ".join(SIWX_IMPORTS)],
+            capture_output=True, timeout=timeout, env=_siwx_env(),
+        )
+        return proc.returncode == 0
+    except Exception:  # noqa: BLE001 - 探测失败就当不可用
+        return False
+
+
+def _pick_siwx_python() -> Optional[str]:
+    """挑一个真能跑 SIWX 的解释器；一个都不行返回 None。
+
+    背景：本项目一旦用 `.venv` 运行（一键启动.bat 已改成优先 .venv），
+    `sys.executable` 就只装了本项目依赖，缺 psutil/pycryptodome，
+    SIWX 一跑就 ModuleNotFoundError → 自动刷新永远失败、消息永远不更新。
+    """
+    for exe in _python_candidates():
+        if _probe_python(exe):
+            return exe
+    return None
+
+
+def _siwx_dep_hint(siwx_run: str) -> str:
+    """给用户的可执行修复步骤（一条能直接粘进命令行的命令）。"""
+    req = Path(siwx_run).parent / "requirements.txt"
+    cands = _python_candidates()
+    exe = cands[0] if cands else "python"
+    return '%s -m pip install -r "%s"' % (exe, req)
+
+
 def _run_siwx(siwx_run: str, python: str = "python") -> bool:
     """跑一次 SIWX 解密，成功返回 True。
 
@@ -77,11 +153,7 @@ def _run_siwx(siwx_run: str, python: str = "python") -> bool:
     而是结合 stdout 内容判断目标账号是否完成了解密。
     """
     try:
-        # 关键：SIWX 用 rich 输出 emoji/符号（如 ✦），在 Windows GBK 控制台下
-        # 会 UnicodeEncodeError 直接崩。强制子进程用 UTF-8 输出即可绕过。
-        env = dict(os.environ)
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUTF8"] = "1"
+        env = _siwx_env()
         proc = subprocess.run(
             [python, siwx_run, "auto"],
             capture_output=True,
@@ -103,6 +175,10 @@ def _run_siwx(siwx_run: str, python: str = "python") -> bool:
             ok = True
         if not ok:
             tail = combined[-300:]
+            if "ModuleNotFoundError" in combined or "No module named" in combined:
+                logger.warning(
+                    "SIWX 少装了自己的依赖（这个解释器：%s）。修：%s",
+                    python, _siwx_dep_hint(siwx_run))
             logger.warning("SIWX 自动刷新失败（exit=%s）：%s", proc.returncode, tail)
         return ok
     except subprocess.TimeoutExpired:
@@ -166,15 +242,15 @@ class AutoRefresher:
                 self.last_error = "未找到 SIWX run.py，请配置 chatlog.auto_refresh.siwx_run 或 WX_SIWX_RUN"
                 logger.warning(self.last_error)
                 return False
-            python = os.environ.get("WX_PYTHON", "")
+            python = _pick_siwx_python()
             if not python:
-                # 源码运行：用当前解释器即可；打包后 sys.frozen 时 sys.executable
-                # 是 exe 本身，不能跑 .py，此时必须靠 WX_PYTHON 或 config 指定。
-                import sys
-                if not getattr(sys, "frozen", False):
-                    python = sys.executable or "python"
-                else:
-                    python = "python"  # 兜底，绝大多数情况在 PATH 里
+                self.last_error = (
+                    "找不到能运行 SIWX 的 Python（缺 psutil / pycryptodome 等）。"
+                    "请执行：" + _siwx_dep_hint(siwx) +
+                    "；或在 .env 里用 WX_PYTHON 指定一个装好这些包的解释器。"
+                )
+                logger.warning(self.last_error)
+                return False
             ok = _run_siwx(siwx, python=python)
             self.last_run_at = time.time()
             if ok:

@@ -41,7 +41,7 @@ MUTEX_NAME = "WeChatWorkHubAutoDaemon"
 
 INSPECT_SEC = 600          # 每 10 分钟检查一次新消息（本地查询，免费）
 WATCH_SEC = 60             # 每 60 秒看一眼悬浮窗还在不在（查窗口，几乎零成本）
-MIN_GAP_SEC = 7200         # 两次执行至少隔 2 小时
+MIN_GAP_SEC = 3600         # 两次执行至少隔 60 分钟（太短会反复调 AI 烧钱）
 JOB_TIMEOUT = 1800         # 单次 daily_job 最长 30 分钟
 
 WIDGET_CLASS = "WeChatWorkHubWidget"
@@ -207,7 +207,8 @@ def decide(state: dict) -> tuple:
         return False, "没有新消息（最新 %s）" % ts_text(newest)
 
     if gap < MIN_GAP_SEC:
-        return False, "有新消息，但距上次执行只有 %.0f 分钟" % (gap / 60)
+        return False, "有新消息，但距上次执行只有 %.0f 分钟（还要等 %.0f 分钟）" % (
+            gap / 60, (MIN_GAP_SEC - gap) / 60)
 
     return True, "有新消息（最新 %s，上次 %s）" % (ts_text(newest), ts_text(last_newest))
 
