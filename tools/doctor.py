@@ -215,6 +215,35 @@ def check_config():
         add(WARN, "config/groups.yaml", "不存在（目标群/领导名单为空）",
             "copy config\\groups.example.yaml config\\groups.yaml 再改群名", "groups")
 
+    _check_text_encoding(ROOT / ".env", ".env", "env_encoding")
+    if groups.exists():
+        _check_text_encoding(groups, "config/groups.yaml", "groups_encoding")
+
+
+def _check_text_encoding(path, label, ident):
+    """手改的配置文件被存成 ANSI(GBK) 或带 BOM 时给一条提醒。
+
+    注意：程序本身已经能读（UTF-8 → GBK → 容错），所以这里只 WARN，不 BAD。
+    带 BOM 的不影响读，但会让老版本把键名读成 `\\ufeffXXX`，一并提醒。
+    """
+    if not path.exists():
+        return  # 没有这个文件是正常的（.env 可以不存在，默认值能跑）
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        add(WARN, label, "读不了：%s" % exc, "检查文件权限/是否被占用", ident)
+        return
+    if raw.startswith(b"\xef\xbb\xbf"):
+        add(WARN, label, "是「UTF-8 with BOM」编码",
+            "用记事本/VS Code 另存为「UTF-8」（不要选 with BOM）；"
+            "新版程序能读，但老版本会把键名读成 \\ufeffXXX", ident)
+        return
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError:
+        add(WARN, label, "不是 UTF-8（像记事本存的 ANSI/GBK）",
+            "另存为 UTF-8；或跑 python tools\\setup.py --yes 让它就地转码", ident)
+
 
 def check_datasource():
     """三态：真实解密库 / 本机 chatlog 服务 / 内置样例。任一可用就算通过。"""

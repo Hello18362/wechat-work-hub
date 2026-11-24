@@ -589,15 +589,21 @@ class HubHandler(BaseHTTPRequestHandler):
         """
         client = shared_client(self.cfg)
         online = client.health()
+        mode = getattr(client, "source_mode", "chatlog")
         from core.config import list_prompt_templates
 
         self._json(
             {
                 "ok": True,
+                # 兼容旧前端：历史上这个字段被当成「数据源连上了」用，其实是
+                # 「当前客户端对象可用」——样例模式下恒为 true，不能用来判断
+                # chatlog 服务是否在线。新代码请用下面两个字段。
                 "chatlog_online": online,
+                "data_source_ready": online,
+                "chatlog_reachable": bool(mode == "chatlog" and online),
                 "api_base": self.cfg.get("chatlog", {}).get("api_base"),
                 # 数据源模式：sqlite/chatlog/sample，前端据此显示不同的状态文案
-                "source_mode": getattr(client, "source_mode", "chatlog"),
+                "source_mode": mode,
                 "today": datetime.now().strftime("%Y-%m-%d"),
                 "templates": list_prompt_templates(),
                 "version": APP_VERSION,

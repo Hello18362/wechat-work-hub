@@ -177,6 +177,42 @@ def resolve_path(path: Any, mkdir: bool = False) -> Path:
 # --------------------------------------------------------------------------- #
 # .env 加载（不引入 python-dotenv，保持依赖最小化）
 # --------------------------------------------------------------------------- #
+def _read_text_friendly(path: Path, what: str = "") -> str:
+    """按「UTF-8(BOM) → GBK → UTF-8 容错」顺序读文本，不因编码抛异常。
+
+    为什么需要这一层（都是换台电脑才会暴露的坑）：
+
+    1. 中文 Windows 的记事本把文件存成 ANSI（GBK），而 `.env` 和
+       `config/groups.yaml` 恰恰是用户必须手改的两个文件，里面本来就有中文
+       注释/群名。只按 utf-8 读会在启动阶段抛 UnicodeDecodeError，用户看到的
+       是一整屏 traceback，而不是「你的文件编码不对」。
+    2. VS Code / 记事本的「UTF-8 with BOM」会让首行键名带上 \\ufeff：
+       `WX_DECRYPTED_DIR` 变成 `\\ufeffWX_DECRYPTED_DIR`，配置被静默丢弃，
+       程序安静地回落到样例数据——比崩掉更难排查。所以先用 utf-8-sig 吃掉 BOM。
+
+    解码顺序是有讲究的：中文注释在 GBK 下几乎不可能恰好是合法 UTF-8，所以
+    先试 utf-8 不会误判；真正读不了才退到 gbk，两边都不行才容错读取（保证
+    进程能起来，同时留下明确日志）。
+    """
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    try:
+        text = path.read_text(encoding="gbk")
+        logger.warning(
+            "%s 不是 UTF-8 编码（像记事本的 ANSI/GBK），已按 GBK 读取；建议另存为 UTF-8：%s",
+            what or path.name, path,
+        )
+        return text
+    except (UnicodeDecodeError, LookupError):
+        logger.warning(
+            "%s 编码无法识别，已按 UTF-8 容错读取（个别中文可能变乱码）：%s",
+            what or path.name, path,
+        )
+        return path.read_text(encoding="utf-8", errors="replace")
+
+
 def load_dotenv(env_path: Optional[Path] = None) -> Dict[str, str]:
     """读取 .env 并写入 os.environ。
 
@@ -188,7 +224,7 @@ def load_dotenv(env_path: Optional[Path] = None) -> Dict[str, str]:
         return loaded
 
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = _read_text_friendly(path, ".env")
     except OSError:
         return loaded
 
@@ -217,7 +253,7 @@ def load_settings(path: Optional[Path] = None, reload_env: bool = True) -> Dict[
     user_cfg: Dict[str, Any] = {}
     if target.exists():
         try:
-            user_cfg = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+            user_cfg = yaml.safe_load(_read_text_friendly(target, "settings.yaml")) or {}
         except yaml.YAMLError as exc:  # 配置写坏了也要能跑，用默认值兜底
             raise ConfigError(f"settings.yaml 解析失败：{exc}") from exc
     else:
@@ -272,12 +308,31 @@ def load_groups(path: Optional[Path] = None) -> List[Dict[str, Any]]:
         return []
 
     try:
-        data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(_read_text_friendly(target, target.name)) or {}
     except yaml.YAMLError as exc:
         raise ConfigError(f"groups.yaml 解析失败：{exc}") from exc
 
+    if not isinstance(data, dict):
+        # 合法 YAML 但结构不对（例如只写了一行群名，没写 target_groups:）。
+        # 不拦的话下一行 .get() 会抛 AttributeError，用户看不懂。
+        raise ConfigError(
+            "groups.yaml 顶层必须是键值映射，正确写法：\n"
+            "  target_groups:\n"
+            "    - name: 群名\n"
+            "      leaders: []"
+        )
+
     groups = (data or {}).get("target_groups", []) or []
     global_leaders = (data or {}).get("global_leaders", []) or []
+    if not isinstance(groups, list):
+        raise ConfigError(
+            "groups.yaml 的 target_groups 必须是列表，正确写法：\n"
+            "  target_groups:\n"
+            "    - name: 群名\n"
+            "      leaders: []"
+        )
+    if not isinstance(global_leaders, list):
+        raise ConfigError("groups.yaml 的 global_leaders 必须是列表，例如：global_leaders: []")
 
     result: List[Dict[str, Any]] = []
     for group in groups:
@@ -285,13 +340,15 @@ def load_groups(path: Optional[Path] = None) -> List[Dict[str, Any]]:
             continue
         if group.get("enabled") is False:
             continue
-        leaders = list(group.get("leaders") or [])
+        leaders = [_normalize_leader(l) for l in (group.get("leaders") or [])]
+        leaders = [l for l in leaders if l]
         # 追加全局名单，去重（id 优先，其次 name）
         seen = {_leader_key(l) for l in leaders}
         for gl in global_leaders:
-            if _leader_key(gl) not in seen:
-                leaders.append(gl)
-                seen.add(_leader_key(gl))
+            norm = _normalize_leader(gl)
+            if norm and _leader_key(norm) not in seen:
+                leaders.append(norm)
+                seen.add(_leader_key(norm))
         result.append(
             {
                 "name": str(group["name"]),
@@ -300,6 +357,25 @@ def load_groups(path: Optional[Path] = None) -> List[Dict[str, Any]]:
             }
         )
     return result
+
+
+def _normalize_leader(item: Any) -> Optional[Dict[str, Any]]:
+    """把 leaders 里的一项统一成 {"name": ..., "id": ...}。
+
+    允许写 ``- 张三``（字符串简写）：example 里写的是字典，但「只写个名字」是
+    最常见的手抖写法，直接放过会在下面 `l.get()` 抛 AttributeError，用户看不懂。
+    返回 None 表示这项是空的，直接丢掉。
+    """
+    if isinstance(item, str):
+        name = item.strip()
+        return {"name": name, "id": ""} if name else None
+    if not isinstance(item, dict):
+        return None
+    name = str(item.get("name") or "").strip()
+    ident = str(item.get("id") or "").strip()
+    if not name and not ident:
+        return None
+    return {"name": name, "id": ident}
 
 
 def _leader_key(leader: Dict[str, Any]) -> str:
@@ -340,7 +416,7 @@ def load_groups_raw(path: Optional[Path] = None) -> Dict[str, Any]:
     if not target.exists():
         return {"target_groups": [], "global_leaders": []}
     try:
-        data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(_read_text_friendly(target, target.name)) or {}
     except yaml.YAMLError:
         return {"target_groups": [], "global_leaders": []}
     if not isinstance(data, dict):
@@ -388,7 +464,7 @@ def save_group_leaders(
 
     if target.exists():
         try:
-            data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load(_read_text_friendly(target, target.name)) or {}
         except yaml.YAMLError as exc:
             raise ConfigError(f"groups.yaml 解析失败：{exc}") from exc
     else:
@@ -450,7 +526,7 @@ def set_group_pinned(
 
     if target.exists():
         try:
-            data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load(_read_text_friendly(target, target.name)) or {}
         except yaml.YAMLError as exc:
             raise ConfigError(f"groups.yaml 解析失败：{exc}") from exc
     else:
@@ -486,7 +562,7 @@ def get_pinned_groups(path: Optional[Path] = None) -> set:
     if not target.exists():
         return set()
     try:
-        data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(_read_text_friendly(target, target.name)) or {}
     except yaml.YAMLError:
         return set()
     if not isinstance(data, dict):
@@ -628,7 +704,7 @@ def _read_env_map() -> Dict[str, str]:
     if not path.exists():
         return result
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = _read_text_friendly(path, ".env")
     except OSError:
         return result
     for line in raw.splitlines():
@@ -654,7 +730,7 @@ def _write_env_updates(updates: Dict[str, str]) -> None:
     existing_lines: List[str] = []
     if path.exists():
         try:
-            existing_lines = path.read_text(encoding="utf-8").splitlines()
+            existing_lines = _read_text_friendly(path, ".env").splitlines()
         except OSError as exc:
             raise ConfigError(f"读取 .env 失败：{exc}") from exc
     else:
@@ -851,7 +927,7 @@ def save_model_config(
     # 同步 settings.yaml：provider 决定走在线还是离线；model 同步一份便于排查
     settings_path = CONFIG_DIR / "settings.yaml"
     try:
-        text = settings_path.read_text(encoding="utf-8") if settings_path.exists() else ""
+        text = _read_text_friendly(settings_path, "settings.yaml") if settings_path.exists() else ""
         text = _set_yaml_scalars_in_section(
             text,
             "summarizer",

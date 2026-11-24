@@ -101,7 +101,18 @@ def run_checks(url: str) -> bool:
     check(st == 200 and d.get("ok"), "GET /api/status 正常", "HTTP %s" % st)
     check("contacts" in feats, "服务端声明 contacts 能力（旧进程不会有）", "features=%s" % feats)
     check("pin" in feats, "服务端声明 pin 能力", "")
-    check(d.get("chatlog_online") is True, "数据源 health 正常", "chatlog_online=%s" % d.get("chatlog_online"))
+    # 别用 chatlog_online 判连通：样例模式下它恒为 true（是「客户端可用」，
+    # 不是「chatlog 服务在线」）。只看 source_mode 与 data_source_ready。
+    check(d.get("source_mode") in ("sqlite", "chatlog", "sample"),
+          "source_mode 是已知取值", "source_mode=%s" % d.get("source_mode"))
+    if d.get("data_source_ready") is None:
+        # 老服务端没有这个字段（用户改了 Python 但没重启服务）——别判失败，
+        # 提示重启即可，否则看起来像「装坏了」。
+        skip("数据源可用（不等于 chatlog 服务在线）", "服务端是旧版本，没有该字段；重启服务再测")
+    else:
+        check(d.get("data_source_ready") is True, "数据源可用（不等于 chatlog 服务在线）",
+              "data_source_ready=%s, chatlog_reachable=%s" % (
+                  d.get("data_source_ready"), d.get("chatlog_reachable")))
     if sample_mode:
         print("       数据源 = 内置样例（没有真实联系人/公众号，下面相关项记为 SKIP 而不是失败）")
 

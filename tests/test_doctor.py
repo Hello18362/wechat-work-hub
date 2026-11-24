@@ -98,5 +98,60 @@ class DoctorHumanOutputTest(unittest.TestCase):
         self.assertIn("--json", proc.stdout)
 
 
+class EncodingRemarkTest(unittest.TestCase):
+    """配置文件编码提醒：只在真有问题时加一行，别给正常文件添噪音。"""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self._doctor = self._load()
+        self._doctor.results = []
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    @staticmethod
+    def _load():
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("doctor_mod", DOCTOR)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _rows(self):
+        return list(self._doctor.results)
+
+    def test_missing_file_adds_nothing(self):
+        self._doctor._check_text_encoding(self.tmp / "nope", ".env", "t")
+        self.assertEqual(self._rows(), [])
+
+    def test_plain_utf8_adds_nothing(self):
+        p = self.tmp / ".env"
+        p.write_text("A=1\n", encoding="utf-8")
+        self._doctor._check_text_encoding(p, ".env", "t")
+        self.assertEqual(self._rows(), [])
+
+    def test_bom_warns(self):
+        p = self.tmp / ".env"
+        p.write_bytes(b"\xef\xbb\xbfA=1\n")
+        self._doctor._check_text_encoding(p, ".env", "t")
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertIn("BOM", rows[0][2])
+        self.assertIn("utf-8", rows[0][3].lower())
+
+    def test_gbk_warns_with_setup_hint(self):
+        p = self.tmp / ".env"
+        p.write_bytes("中文=1\n".encode("gbk"))
+        self._doctor._check_text_encoding(p, ".env", "t")
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertIn("ANSI", rows[0][2])
+        self.assertIn("setup.py", rows[0][3])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

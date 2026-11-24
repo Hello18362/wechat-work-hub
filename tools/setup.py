@@ -163,11 +163,49 @@ def step_deps(python: Path) -> None:
         say("bad", "装完仍然导不进来：%s" % (out.splitlines()[-1] if out else ""))
 
 
+def _read_env_friendly(path: Path) -> str:
+    """读 .env：UTF-8(BOM) → GBK → UTF-8 容错。与 core/config.py 同一套顺序。
+
+    安装期这一步的意义是**把编码问题提前暴露并当场修掉**，而不是等用户改完
+    配置、跑到 main.py 时才收到一屏 UnicodeDecodeError。
+    """
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return path.read_text(encoding="gbk")
+    except (UnicodeDecodeError, LookupError):
+        return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _env_encoding_problem(path: Path) -> str:
+    """返回 .env 的编码问题描述；没问题返回空串。"""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return ""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return "带 BOM（配置键会被当成 \\ufeffWX_... 而静默失效）"
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return "不是 UTF-8（像记事本存的 ANSI/GBK）"
+    return ""
+
+
 def step_env() -> None:
     env = ROOT / ".env"
     example = ROOT / ".env.example"
     if env.exists():
-        text = env.read_text(encoding="utf-8", errors="replace")
+        problem = _env_encoding_problem(env)
+        if problem:
+            # 就地转成 UTF-8 无 BOM：内容一个字都不丢，只是换个编码存。
+            text = _read_env_friendly(env)
+            env.write_text(text, encoding="utf-8")
+            say("warn", ".env 编码有问题（%s），已自动转成 UTF-8" % problem)
+            say("info", "  以后用记事本改 .env，保存时编码选 UTF-8，别用 ANSI")
+        text = _read_env_friendly(env)
         if "your_api_key_here" in text:
             say("warn", ".env 里还是占位 Key，总结会降级成本地草稿（链路不算断）")
         else:
@@ -179,6 +217,7 @@ def step_env() -> None:
     env.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
     say("info", "已从 .env.example 生成 .env —— 这是**唯一需要人动手**的地方：")
     say("info", "  打开 .env，把 DEEPSEEK_API_KEY=your_api_key_here 换成真实 Key")
+    say("info", "  （用记事本保存时，编码请选 UTF-8，别选 ANSI）")
 
 
 def step_siwx(python: Path) -> None:
@@ -186,7 +225,7 @@ def step_siwx(python: Path) -> None:
     env = ROOT / ".env"
     dec = ""
     if env.exists():
-        for line in env.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in _read_env_friendly(env).splitlines():
             if line.strip().startswith("WX_DECRYPTED_DIR="):
                 dec = line.split("=", 1)[1].strip()
     if not dec:

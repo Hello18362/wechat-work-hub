@@ -37,7 +37,7 @@ jobs:
       - name: Regression tests
         # tests/test_regression.py / test_sample_client.py / test_launch.py /
         # test_widget_layout.py / test_widget_watchdog.py / test_doctor.py /
-        # test_auto_refresh.py / test_setup.py 都是纯标准库 unittest；
+        # test_auto_refresh.py / test_setup.py / test_config_robust.py 都是纯标准库 unittest；
         # tests/test_server.py 需要先起控制台服务，不进 CI。
         run: |
           python tests/test_regression.py
@@ -48,6 +48,7 @@ jobs:
           python tests/test_doctor.py
           python tests/test_auto_refresh.py
           python tests/test_setup.py
+          python tests/test_config_robust.py
 
       - name: Sanity import
         run: python -c "import main, core.config, output.html, web.server; print('ok')"

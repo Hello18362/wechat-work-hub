@@ -100,6 +100,10 @@ python tools\setup.py --yes
 
 > 项数会变：全新机器 22 项；接了真实数据源会多出 `message_db` 等，最多 23 项。
 > **唯一要盯的是「失败 0」**，项数不用对。
+>
+> 措辞也会变：第二次跑时打印的是「虚拟环境已存在」「核心依赖齐全（…）」，
+> 不是「已创建」「依赖已装好」——这是幂等命中，**不是失败**。判断标准只有
+> 「失败 0」+ 末行「自检通过：没有硬问题」。
 
 实测耗时：**25 秒**（首次，含建 venv 与下载依赖；第二次跑 2 秒内完成）。
 
@@ -170,8 +174,15 @@ curl http://127.0.0.1:5710/health
 ```bat
 curl http://127.0.0.1:5710/api/status
 ```
-期望含 `"source_mode": "sample"`（没接真实微信时）或 `"sqlite"`（接了），且 `"chatlog_online": true`。
+期望含 `"source_mode": "sample"`（没接真实微信时）或 `"sqlite"`（接了）。
 `source_mode` 是 `"sample"` **不是错误**——它表示「没配真实数据源，用内置虚样例在跑」，见第 5.5 节。
+
+> **⚠️ 不要用 `chatlog_online` 当通过标准。** 这个字段在样例模式下**恒为 `true`**
+> （它表示「客户端对象可用」，不是「chatlog 服务在线」），拿它判断连通性等于永远通过。
+> 实测：chatlog 服务根本没起（5030 端口拒绝连接），这个字段照样是 `true`。
+> 判断数据源只看 `source_mode`，或看页面右上角的文案。
+> 想用布尔值判断，用 `"data_source_ready": true`（当前客户端能用）；
+> `"chatlog_reachable"` 才表示 chatlog 那套本机服务真的在线（样例/解密库模式下它是 false，正常）。
 
 **5.3 全链路自检（前端资源 + 每个接口 + 数据规模）**
 
@@ -300,6 +311,41 @@ curl http://127.0.0.1:5710/api/status
 - OneDrive 同步目录会让文件被锁、venv 被反复重写 → 换到 `D:\wwh`。
 - 路径带空格时，所有命令里的路径都要加引号。
 - 无管理员权限：不要试图装到 `C:\Program Files`；装用户目录（默认就是这样）。
+
+### 5.11 改完 `.env` / `groups.yaml` 启动就崩：`UnicodeDecodeError`
+
+症状：终端一屏 traceback，最后一行是
+`UnicodeDecodeError: 'utf-8' codec can't decode byte 0x?? in position ??: invalid continuation byte`。
+
+原因：文件被存成了 **ANSI（GBK）**。中文 Windows 的记事本默认就存这个编码，
+而 `.env` 和 `config\groups.yaml` 恰恰是**用户必须手改**、里面又有中文的两个文件。
+
+修法（任选其一）：
+
+1. 编辑器里「另存为」，编码选 **UTF-8**。**不要选「UTF-8 with BOM」**。
+2. 直接跑 `.venv\Scripts\python.exe tools\setup.py --yes`——它会检测到非 UTF-8 的
+   `.env` 并**就地转码**（内容不丢，只换编码），然后提示你以后另存为 UTF-8。
+3. PowerShell 一行：`(Get-Content .env -Encoding Default) | Set-Content .env -Encoding utf8`
+
+> **带 BOM 的 UTF-8 更阴**：它不崩，但首行的键会变成 `\ufeffWX_DECRYPTED_DIR`，
+> 配置静默失效 → 程序安静地回落到样例数据。所以「配了解密目录却显示 `sample`」
+> 时，除了查路径，还要查 BOM（见 5.7）。
+>
+> 程序本身已做兜底（UTF-8 → GBK → 容错读取，并在日志里警告一次），所以真遇到
+> 也不会崩；但编码不对会让中文路径/群名出现乱码，**能转 UTF-8 就转**。
+
+**顺带一个同类坑：`groups.yaml` 的 `leaders` 写成一串名字。**
+
+```yaml
+leaders:
+  - 张三          # 简写，能认
+  - name: 李四    # 标准写法
+    id: wxid_xxx
+```
+
+两种都行（只写名字也行）。但如果把 `target_groups` 写成映射、或整个文件只有一行群名，
+程序现在会给一句人话报错（「target_groups 必须是列表」），而不是 `AttributeError`。
+
 
 ---
 
